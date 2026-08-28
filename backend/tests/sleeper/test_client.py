@@ -1,0 +1,128 @@
+import httpx
+import pytest
+import respx
+
+from app.sleeper.client import SLEEPER_BASE_URL, SleeperClient
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_league_parses_response():
+    respx.get(f"{SLEEPER_BASE_URL}/league/123").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "league_id": "123",
+                "name": "The League",
+                "season": "2026",
+                "season_type": "regular",
+                "sport": "nfl",
+                "status": "in_season",
+                "total_rosters": 12,
+            },
+        )
+    )
+
+    client = SleeperClient()
+    league = await client.get_league("123")
+    await client.aclose()
+
+    assert league.league_id == "123"
+    assert league.name == "The League"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_rosters_parses_list():
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/rosters").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "owner_id": "user_1",
+                    "league_id": "123",
+                    "players": ["1001"],
+                    "starters": ["1001"],
+                    "settings": {"wins": 5, "losses": 3, "ties": 0},
+                },
+                {
+                    "roster_id": 2,
+                    "owner_id": "user_2",
+                    "league_id": "123",
+                    "players": [],
+                    "starters": [],
+                    "settings": {"wins": 3, "losses": 5, "ties": 0},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    rosters = await client.get_rosters("123")
+    await client.aclose()
+
+    assert len(rosters) == 2
+    assert rosters[0].settings.wins == 5
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_matchups_parses_list():
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/matchups/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "matchup_id": 4,
+                    "points": 123.45,
+                    "starters": ["1001"],
+                    "players": ["1001", "1002"],
+                },
+                {
+                    "roster_id": 2,
+                    "matchup_id": 4,
+                    "points": 110.2,
+                    "starters": [],
+                    "players": [],
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    matchups = await client.get_matchups("123", week=1)
+    await client.aclose()
+
+    assert len(matchups) == 2
+    assert matchups[0].points == 123.45
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_users_parses_list():
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/users").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "user_id": "user_1",
+                    "display_name": "sean",
+                    "metadata": {"team_name": "The Bench Warmers"},
+                },
+                {
+                    "user_id": "user_2",
+                    "display_name": "friend",
+                    "metadata": {},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    users = await client.get_users("123")
+    await client.aclose()
+
+    assert len(users) == 2
+    assert users[0].metadata["team_name"] == "The Bench Warmers"

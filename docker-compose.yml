@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: gridlytics
+      POSTGRES_PASSWORD: gridlytics
+      POSTGRES_DB: gridlytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - gridlytics_pg_data:/var/lib/postgresql/data
+
+volumes:
+  gridlytics_pg_data:
