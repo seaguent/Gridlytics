@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: gridlytics
       POSTGRES_DB: gridlytics
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - gridlytics_pg_data:/var/lib/postgresql/data
 
