@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import League, Matchup, Team, WeeklyScore
+from app.models import League, Matchup, RosterSlot, Team, WeeklyScore
 from app.sleeper.client import SleeperClient
 
 
@@ -26,6 +26,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
             season=raw_league.season,
             name=raw_league.name,
             status=raw_league.status,
+            roster_positions=raw_league.roster_positions,
         )
         session.add(league)
         await session.flush()
@@ -33,6 +34,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
         league.season = raw_league.season
         league.name = raw_league.name
         league.status = raw_league.status
+        league.roster_positions = raw_league.roster_positions
 
     for raw_roster in raw_rosters:
         result = await session.execute(
@@ -117,5 +119,31 @@ async def sync_week(
             )
         else:
             weekly_score.points = raw.points
+
+        starters = set(raw.starters)
+        for platform_player_id, points in raw.players_points.items():
+            is_starter = platform_player_id in starters
+
+            result = await session.execute(
+                select(RosterSlot).where(
+                    RosterSlot.team_id == team.id,
+                    RosterSlot.week == week,
+                    RosterSlot.platform_player_id == platform_player_id,
+                )
+            )
+            slot = result.scalar_one_or_none()
+            if slot is None:
+                session.add(
+                    RosterSlot(
+                        team_id=team.id,
+                        week=week,
+                        platform_player_id=platform_player_id,
+                        is_starter=is_starter,
+                        points=points,
+                    )
+                )
+            else:
+                slot.is_starter = is_starter
+                slot.points = points
 
     await session.commit()

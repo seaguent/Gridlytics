@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, JSON, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -18,6 +18,7 @@ class League(Base):
     season: Mapped[str] = mapped_column(String(8))
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32))
+    roster_positions: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     teams: Mapped[list["Team"]] = relationship(back_populates="league")
@@ -40,6 +41,7 @@ class Team(Base):
 
     league: Mapped["League"] = relationship(back_populates="teams")
     weekly_scores: Mapped[list["WeeklyScore"]] = relationship(back_populates="team")
+    roster_slots: Mapped[list["RosterSlot"]] = relationship(back_populates="team")
 
 
 class Matchup(Base):
@@ -65,3 +67,26 @@ class WeeklyScore(Base):
 
     team: Mapped["Team"] = relationship(back_populates="weekly_scores")
     matchup: Mapped["Matchup"] = relationship(back_populates="weekly_scores")
+
+
+class RosterSlot(Base):
+    __tablename__ = "roster_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
+    week: Mapped[int]
+    platform_player_id: Mapped[str] = mapped_column(String(32))
+    is_starter: Mapped[bool]
+    points: Mapped[float] = mapped_column(default=0)
+
+    team: Mapped["Team"] = relationship(back_populates="roster_slots")
+
+
+class Player(Base):
+    __tablename__ = "players"
+
+    platform: Mapped[str] = mapped_column(String(20), primary_key=True)
+    platform_player_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    position: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())

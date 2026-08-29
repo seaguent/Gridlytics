@@ -126,3 +126,25 @@ async def test_get_users_parses_list():
 
     assert len(users) == 2
     assert users[0].metadata["team_name"] == "The Bench Warmers"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_all_players_parses_dict_keyed_by_player_id():
+    respx.get(f"{SLEEPER_BASE_URL}/players/nfl").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "100": {"position": "RB", "full_name": "Some Runningback"},
+                "200": {"position": "DEF", "full_name": "San Francisco 49ers"},
+            },
+        )
+    )
+
+    client = SleeperClient()
+    players = await client.get_all_players()
+    await client.aclose()
+
+    assert len(players) == 2
+    assert players["100"].position == "RB"
+    assert players["200"].full_name == "San Francisco 49ers"

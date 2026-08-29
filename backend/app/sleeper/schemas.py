@@ -12,6 +12,7 @@ class SleeperLeague(BaseModel):
     status: str
     total_rosters: int
     previous_league_id: str | None = None
+    roster_positions: list[str] = []
 
 
 class SleeperRosterSettings(BaseModel):
@@ -45,6 +46,7 @@ class SleeperMatchup(BaseModel):
     points: float = 0
     starters: list[str] = []
     players: list[str] = []
+    players_points: dict[str, float] = {}
 
 
 class SleeperUser(BaseModel):
@@ -53,3 +55,10 @@ class SleeperUser(BaseModel):
     user_id: str
     display_name: str
     metadata: dict = {}
+
+
+class SleeperPlayer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    position: str | None = None
+    full_name: str | None = None

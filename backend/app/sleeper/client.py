@@ -1,6 +1,12 @@
 import httpx
 
-from app.sleeper.schemas import SleeperLeague, SleeperMatchup, SleeperRoster, SleeperUser
+from app.sleeper.schemas import (
+    SleeperLeague,
+    SleeperMatchup,
+    SleeperPlayer,
+    SleeperRoster,
+    SleeperUser,
+)
 
 SLEEPER_BASE_URL = "https://api.sleeper.app/v1"
 
@@ -28,6 +34,14 @@ class SleeperClient:
         response = await self._client.get(f"/league/{league_id}/users")
         response.raise_for_status()
         return [SleeperUser.model_validate(item) for item in response.json()]
+
+    async def get_all_players(self) -> dict[str, SleeperPlayer]:
+        response = await self._client.get("/players/nfl", timeout=30.0)
+        response.raise_for_status()
+        return {
+            player_id: SleeperPlayer.model_validate(data)
+            for player_id, data in response.json().items()
+        }
 
     async def aclose(self) -> None:
         await self._client.aclose()

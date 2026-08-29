@@ -3,7 +3,7 @@ import pytest
 import respx
 from sqlalchemy import select
 
-from app.models import Matchup, Team, WeeklyScore
+from app.models import Matchup, RosterSlot, Team, WeeklyScore
 from app.sleeper.adapter import sync_league, sync_week
 from app.sleeper.client import SLEEPER_BASE_URL, SleeperClient
 
@@ -144,3 +144,87 @@ async def test_sync_week_is_idempotent(db_session):
 
     result = await db_session.execute(select(WeeklyScore))
     assert len(result.scalars().all()) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_week_creates_roster_slots(db_session):
+    _mock_sleeper_league("123")
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/matchups/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "matchup_id": 10,
+                    "points": 105.5,
+                    "starters": ["100", "101"],
+                    "players": ["100", "101", "102"],
+                    "players_points": {"100": 60.5, "101": 45.0, "102": 20.0},
+                },
+                {
+                    "roster_id": 2,
+                    "matchup_id": 10,
+                    "points": 98.2,
+                    "starters": ["200"],
+                    "players": ["200", "201"],
+                    "players_points": {"200": 98.2, "201": 15.0},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, "123")
+    await sync_week(db_session, client, league, week=1)
+    await client.aclose()
+
+    result = await db_session.execute(select(Team).where(Team.platform_roster_id == "1"))
+    team_1 = result.scalar_one()
+
+    result = await db_session.execute(select(RosterSlot).where(RosterSlot.team_id == team_1.id))
+    slots = {slot.platform_player_id: slot for slot in result.scalars().all()}
+
+    assert len(slots) == 3
+    assert slots["100"].is_starter is True
+    assert slots["100"].points == 60.5
+    assert slots["102"].is_starter is False
+    assert slots["102"].points == 20.0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_week_roster_slots_is_idempotent(db_session):
+    _mock_sleeper_league("123")
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/matchups/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "matchup_id": 10,
+                    "points": 105.5,
+                    "starters": ["100"],
+                    "players": ["100", "102"],
+                    "players_points": {"100": 60.5, "102": 20.0},
+                },
+                {
+                    "roster_id": 2,
+                    "matchup_id": 10,
+                    "points": 98.2,
+                    "starters": ["200"],
+                    "players": ["200"],
+                    "players_points": {"200": 98.2},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, "123")
+    await sync_week(db_session, client, league, week=1)
+    await sync_week(db_session, client, league, week=1)
+    await client.aclose()
+
+    result = await db_session.execute(select(RosterSlot))
+    assert len(result.scalars().all()) == 3
