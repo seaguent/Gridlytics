@@ -1,0 +1,132 @@
+body {
+  width: 380px;
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 12px;
+  background: #ffffff;
+  color: #111827;
+}
+
+.popup.error {
+  color: #b91c1c;
+  font-size: 14px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 6px 4px;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tabs button.active {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+.gl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gl-row {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.gl-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gl-row-rank {
+  color: #6b7280;
+  font-size: 12px;
+  width: 16px;
+}
+
+.gl-row-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.gl-row-record {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.gl-row-stats {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  padding-left: 24px;
+}
+
+.gl-stat {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.gl-stat-sep {
+  color: #6b7280;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.gl-row--power {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gl-power-score {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.gl-bar-row {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.gl-bar-row-top {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.gl-bar-pct {
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.gl-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.gl-bar-fill {
+  height: 100%;
+  background: #2563eb;
+  border-radius: 3px;
+}

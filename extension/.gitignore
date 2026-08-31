@@ -1,0 +1,7 @@
+node_modules/
+content.js
+content.js.map
+background.js
+background.js.map
+popup.js
+popup.js.map

@@ -119,6 +119,17 @@ def test_create_connection_and_fetch_standings(client):
     assert len(standings) == 2
     assert {row["display_name"] for row in standings} == {"sean", "friend"}
 
+    info_response = client.get(
+        "/leagues/me", headers={"Authorization": "Bearer my-secret-token"}
+    )
+    assert info_response.status_code == 200
+    assert info_response.json() == {
+        "name": "The League",
+        "season": "2026",
+        "status": "in_season",
+        "current_week": 1,
+    }
+
 
 def test_missing_authorization_header_returns_401(client):
     response = client.get("/leagues/me/standings")

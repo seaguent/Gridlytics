@@ -1,3 +1,4 @@
+import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -6,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics.loader import (
     load_power_ranking_inputs,
     load_remaining_schedule,
+    load_roster_slots,
     load_simulation_inputs,
     load_weekly_scores,
 )
 from app.analytics.playoffs import simulate_season
 from app.analytics.power_rankings import compute_power_rankings
-from app.analytics.roster import compute_roster_efficiency
+from app.analytics.recap import generate_weekly_recap
+from app.analytics.roster import compute_bench_points, compute_roster_efficiency, summarize_roster_efficiency
 from app.analytics.standings import compute_expected_wins, compute_schedule_strength
 from app.deps import get_fresh_league, get_session
 from app.models import League, LeagueConnection, Team
@@ -55,6 +58,16 @@ async def create_connection(
     await session.commit()
 
     return ConnectionResponse(league_id=league.id, name=league.name, season=league.season)
+
+
+@app.get("/leagues/me")
+async def get_league_info(league: League = Depends(get_fresh_league)) -> dict:
+    return {
+        "name": league.name,
+        "season": league.season,
+        "status": league.status,
+        "current_week": league.current_week,
+    }
 
 
 @app.get("/leagues/me/standings")
@@ -108,21 +121,97 @@ async def get_power_rankings(
 async def get_roster_efficiency(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
 ) -> list[dict]:
-    result = await compute_roster_efficiency(session, league)
-    return result.to_dict(orient="records")
+    efficiency = await compute_roster_efficiency(session, league)
+    if not len(efficiency):
+        return []
+
+    summary = summarize_roster_efficiency(efficiency)
+
+    result = await session.execute(select(Team).where(Team.league_id == league.id))
+    names = {team.id: team.display_name for team in result.scalars()}
+
+    return [
+        {
+            "team_id": int(row.team_id),
+            "display_name": names.get(row.team_id, ""),
+            "avg_efficiency": None if pd.isna(row.avg_efficiency) else float(row.avg_efficiency),
+        }
+        for row in summary.itertuples()
+    ]
 
 
 @app.get("/leagues/me/playoff-odds")
 async def get_playoff_odds(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> list[dict]:
     current_records, team_score_dist = await load_simulation_inputs(session, league.id)
     remaining_schedule = await load_remaining_schedule(session, league)
 
-    return simulate_season(
+    odds = simulate_season(
         current_records=current_records,
         team_score_dist=team_score_dist,
         remaining_schedule=remaining_schedule,
         playoff_spots=league.playoff_teams,
         num_trials=5000,
     )
+
+    result = await session.execute(select(Team).where(Team.league_id == league.id))
+    names = {team.id: team.display_name for team in result.scalars()}
+
+    rows = [
+        {
+            "team_id": team_id,
+            "display_name": names.get(team_id, ""),
+            "playoff_odds": stats["playoff_odds"],
+            "projected_wins": stats["projected_wins"],
+        }
+        for team_id, stats in odds.items()
+    ]
+    return sorted(rows, key=lambda row: row["playoff_odds"], reverse=True)
+
+
+@app.get("/leagues/me/recap/{week}")
+async def get_weekly_recap(
+    week: int,
+    league: League = Depends(get_fresh_league),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    scores = await load_weekly_scores(session, league.id)
+    week_scores = scores[scores["week"] == week].reset_index(drop=True)
+    if not len(week_scores):
+        raise HTTPException(status_code=404, detail=f"No data for week {week}")
+
+    power_inputs = await load_power_ranking_inputs(session, league.id)
+    power_scores = {}
+    if len(power_inputs):
+        rankings = compute_power_rankings(power_inputs)
+        power_scores = dict(zip(rankings["team_id"], rankings["power_score"]))
+
+    roster = await load_roster_slots(session, league.id)
+    week_roster = roster[roster["week"] == week]
+    bench_points = (
+        compute_bench_points(week_roster)
+        if len(week_roster)
+        else pd.DataFrame(columns=["team_id", "week", "bench_points"])
+    )
+
+    recap = generate_weekly_recap(week_scores, power_scores, bench_points)
+
+    result = await session.execute(select(Team).where(Team.league_id == league.id))
+    names = {team.id: team.display_name for team in result.scalars()}
+
+    def named(entry: dict | None, *id_fields: str) -> dict | None:
+        if entry is None:
+            return None
+        extra = {f"{field}_name": names.get(entry[field], "") for field in id_fields}
+        return {**entry, **extra}
+
+    return {
+        "week": week,
+        "highest_scorer": named(recap["highest_scorer"], "team_id"),
+        "lowest_scorer": named(recap["lowest_scorer"], "team_id"),
+        "closest_game": named(recap["closest_game"], "team_a", "team_b"),
+        "biggest_upset": named(recap["biggest_upset"], "winner_team_id", "loser_team_id"),
+        "unluckiest_team": named(recap["unluckiest_team"], "team_id"),
+        "worst_bench_decision": named(recap["worst_bench_decision"], "team_id"),
+    }

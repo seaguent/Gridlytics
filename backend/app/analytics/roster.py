@@ -63,3 +63,9 @@ async def compute_roster_efficiency(session: AsyncSession, league: League) -> pd
     return pd.DataFrame(
         records, columns=["team_id", "week", "actual_points", "optimal_points", "efficiency"]
     )
+
+
+def summarize_roster_efficiency(efficiency: pd.DataFrame) -> pd.DataFrame:
+    averages = efficiency.groupby("team_id")["efficiency"].mean().reset_index()
+    averages.columns = ["team_id", "avg_efficiency"]
+    return averages.sort_values("avg_efficiency", ascending=False, na_position="last")
