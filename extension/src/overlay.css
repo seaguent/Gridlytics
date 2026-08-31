@@ -82,6 +82,27 @@
   color: var(--gl-text-muted);
 }
 
+.gl-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gl-refresh {
+  background: var(--gl-bg-card);
+  border: none;
+  color: var(--gl-text);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gl-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .gl-close {
   background: none;
   border: none;

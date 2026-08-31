@@ -13,17 +13,20 @@ export function Popup() {
 
   useEffect(() => {
     (async () => {
-      const stored = await chrome.storage.local.get(["activeLeagueId"]);
-      const activeLeagueId = stored.activeLeagueId as string | undefined;
-      if (!activeLeagueId) {
-        setLoadError("No league connected yet. Visit your Sleeper league page and click Connect League.");
+      const stored = await chrome.storage.local.get(["activeConnection"]);
+      const activeConnection = stored.activeConnection as
+        | { platform: string; leagueId: string }
+        | undefined;
+      if (!activeConnection) {
+        setLoadError("No league connected yet. Visit your Sleeper or ESPN league page and click Connect League.");
         return;
       }
 
-      const tokenResult = await chrome.storage.local.get([`token:${activeLeagueId}`]);
-      const storedToken = tokenResult[`token:${activeLeagueId}`] as string | undefined;
+      const storageKey = `token:${activeConnection.platform}:${activeConnection.leagueId}`;
+      const tokenResult = await chrome.storage.local.get([storageKey]);
+      const storedToken = tokenResult[storageKey] as string | undefined;
       if (!storedToken) {
-        setLoadError("Connection token missing. Try reconnecting from your Sleeper league page.");
+        setLoadError("Connection token missing. Try reconnecting from your league page.");
         return;
       }
       setToken(storedToken);

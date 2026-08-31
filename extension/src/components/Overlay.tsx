@@ -8,6 +8,10 @@ import { PowerRankings } from "./PowerRankings";
 import { Recap } from "./Recap";
 import { Standings } from "./Standings";
 
+export type OverlayLeague =
+  | { platform: "sleeper"; leagueId: string }
+  | { platform: "espn"; leagueId: string; season: string };
+
 function formatSubtitle(info: LeagueInfo): string {
   const period = info.status === "pre_draft" ? "Preseason" : `Week ${info.current_week}`;
   return `${info.name} · ${period}`;
@@ -30,11 +34,12 @@ function ChartIcon() {
   );
 }
 
-export function Overlay({ leagueId }: { leagueId: string }) {
+export function Overlay({ league }: { league: OverlayLeague }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>("standings");
   const [leagueInfo, setLeagueInfo] = useState<LeagueInfo | null>(null);
 
@@ -42,12 +47,14 @@ export function Overlay({ leagueId }: { leagueId: string }) {
   const [recap, setRecap] = useState<WeeklyRecap | null>(null);
   const [recapError, setRecapError] = useState<string | null>(null);
 
+  const storageKey = `token:${league.platform}:${league.leagueId}`;
+
   useEffect(() => {
-    chrome.storage.local.get([`token:${leagueId}`]).then((result) => {
-      const stored = result[`token:${leagueId}`] as string | undefined;
+    chrome.storage.local.get([storageKey]).then((result) => {
+      const stored = result[storageKey] as string | undefined;
       if (stored) setToken(stored);
     });
-  }, [leagueId]);
+  }, [storageKey]);
 
   useEffect(() => {
     if (!token) return;
@@ -74,11 +81,13 @@ export function Overlay({ leagueId }: { leagueId: string }) {
   const handleConnect = async () => {
     setConnecting(true);
     setConnectError(null);
-    const response = (await chrome.runtime.sendMessage({
-      type: "CONNECT_LEAGUE",
-      platform: "sleeper",
-      platformLeagueId: leagueId,
-    })) as ConnectResponse;
+
+    const message =
+      league.platform === "sleeper"
+        ? { type: "CONNECT_LEAGUE" as const, platform: "sleeper" as const, platformLeagueId: league.leagueId }
+        : { type: "CONNECT_ESPN_LEAGUE" as const, leagueId: league.leagueId, season: league.season };
+
+    const response = (await chrome.runtime.sendMessage(message)) as ConnectResponse;
     setConnecting(false);
 
     if (!response?.ok) {
@@ -86,8 +95,23 @@ export function Overlay({ leagueId }: { leagueId: string }) {
       return;
     }
 
-    const stored = await chrome.storage.local.get([`token:${leagueId}`]);
-    setToken(stored[`token:${leagueId}`] as string);
+    const stored = await chrome.storage.local.get([storageKey]);
+    setToken(stored[storageKey] as string);
+  };
+
+  const handleRefresh = async () => {
+    if (league.platform !== "espn" || !token) return;
+    setRefreshing(true);
+    const response = (await chrome.runtime.sendMessage({
+      type: "RESYNC_ESPN_LEAGUE",
+      leagueId: league.leagueId,
+      season: league.season,
+      token,
+    })) as ConnectResponse;
+    setRefreshing(false);
+    if (!response?.ok) {
+      setConnectError(response?.error ?? "Refresh failed");
+    }
   };
 
   const dataReady = standings && powerRankings && playoffOdds && efficiency;
@@ -108,9 +132,21 @@ export function Overlay({ leagueId }: { leagueId: string }) {
             <span className="gl-brand">Gridlytics</span>
             {leagueInfo && <span className="gl-subtitle">{formatSubtitle(leagueInfo)}</span>}
           </div>
-          <button className="gl-close" onClick={() => setOpen(false)} aria-label="Close">
-            &times;
-          </button>
+          <div className="gl-header-actions">
+            {token && league.platform === "espn" && (
+              <button
+                className="gl-refresh"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                aria-label="Refresh ESPN data"
+              >
+                {refreshing ? "..." : "Refresh"}
+              </button>
+            )}
+            <button className="gl-close" onClick={() => setOpen(false)} aria-label="Close">
+              &times;
+            </button>
+          </div>
         </div>
 
         {!token && (
@@ -156,6 +192,8 @@ export function Overlay({ leagueId }: { leagueId: string }) {
                 Recap
               </button>
             </div>
+
+            {connectError && <div className="gl-error">{connectError}</div>}
 
             <div className="gl-body">
               {tab !== "recap" && error && <div className="gl-error">{error}</div>}

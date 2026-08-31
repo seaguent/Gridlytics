@@ -18,6 +18,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
         select(League).where(
             League.platform == "sleeper",
             League.platform_league_id == league_id,
+            League.season == raw_league.season,
         )
     )
     league = result.scalar_one_or_none()

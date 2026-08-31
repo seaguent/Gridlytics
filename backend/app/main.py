@@ -19,7 +19,9 @@ from app.analytics.recap import generate_weekly_recap
 from app.analytics.roster import compute_bench_points, compute_roster_efficiency, summarize_roster_efficiency
 from app.analytics.standings import compute_expected_wins, compute_schedule_strength
 from app.db import engine
-from app.deps import get_fresh_league, get_session
+from app.deps import get_current_league, get_fresh_league, get_session
+from app.espn.adapter import sync_league as espn_sync_league
+from app.espn.schemas import EspnLeagueResponse
 from app.models import Base, League, LeagueConnection, Team
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
@@ -71,6 +73,42 @@ async def create_connection(
     await session.commit()
 
     return ConnectionResponse(league_id=league.id, name=league.name, season=league.season)
+
+
+class EspnConnectionRequest(BaseModel):
+    raw_league_data: dict
+    access_token_hash: str
+
+
+@app.post("/connections/espn", response_model=ConnectionResponse)
+async def create_espn_connection(
+    body: EspnConnectionRequest, session: AsyncSession = Depends(get_session)
+) -> ConnectionResponse:
+    raw = EspnLeagueResponse.model_validate(body.raw_league_data)
+    league = await espn_sync_league(session, raw)
+
+    session.add(LeagueConnection(league_id=league.id, access_token_hash=body.access_token_hash))
+    await session.commit()
+
+    return ConnectionResponse(league_id=league.id, name=league.name, season=league.season)
+
+
+class EspnResyncRequest(BaseModel):
+    raw_league_data: dict
+
+
+@app.post("/leagues/me/resync-espn")
+async def resync_espn_league(
+    body: EspnResyncRequest,
+    league: League = Depends(get_current_league),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    if league.platform != "espn":
+        raise HTTPException(status_code=400, detail="This league is not an ESPN league")
+
+    raw = EspnLeagueResponse.model_validate(body.raw_league_data)
+    await espn_sync_league(session, raw)
+    return {"status": "ok"}
 
 
 @app.get("/leagues/me")

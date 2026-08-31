@@ -131,6 +131,48 @@ def test_create_connection_and_fetch_standings(client):
     }
 
 
+def test_espn_connection_and_resync_flow(client):
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    connect_response = client.post(
+        "/connections/espn",
+        json={
+            "raw_league_data": SAMPLE_RAW,
+            "access_token_hash": hash_token("espn-secret-token"),
+        },
+    )
+    assert connect_response.status_code == 200
+    assert connect_response.json()["name"] == "Test League"
+
+    # get_fresh_league must NOT attempt a Sleeper refresh for an ESPN league
+    # (no respx mock is set up here -- if it tried, this would error/hang).
+    standings_response = client.get(
+        "/leagues/me/standings",
+        headers={"Authorization": "Bearer espn-secret-token"},
+    )
+    assert standings_response.status_code == 200
+    assert len(standings_response.json()) == 2
+
+    updated_raw = {**SAMPLE_RAW}
+    updated_raw["teams"] = [
+        {**SAMPLE_RAW["teams"][0], "record": {"overall": {"wins": 3, "losses": 1, "ties": 0, "pointsFor": 400.0, "pointsAgainst": 300.0}}},
+        SAMPLE_RAW["teams"][1],
+    ]
+    resync_response = client.post(
+        "/leagues/me/resync-espn",
+        json={"raw_league_data": updated_raw},
+        headers={"Authorization": "Bearer espn-secret-token"},
+    )
+    assert resync_response.status_code == 200
+
+    standings_response = client.get(
+        "/leagues/me/standings",
+        headers={"Authorization": "Bearer espn-secret-token"},
+    )
+    team_one = next(row for row in standings_response.json() if row["display_name"] == "Team One")
+    assert team_one["wins"] == 3
+
+
 def test_missing_authorization_header_returns_401(client):
     response = client.get("/leagues/me/standings")
     assert response.status_code == 401

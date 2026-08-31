@@ -1,10 +1,25 @@
 import { createRoot } from "react-dom/client";
-import { Overlay } from "./components/Overlay";
+import { Overlay, OverlayLeague } from "./components/Overlay";
+import { extractEspnLeagueInfo } from "./espn";
 import { extractLeagueId } from "./sleeper";
 
-const leagueId = extractLeagueId(window.location.href);
+function detectLeague(): OverlayLeague | null {
+  const sleeperLeagueId = extractLeagueId(window.location.href);
+  if (sleeperLeagueId) {
+    return { platform: "sleeper", leagueId: sleeperLeagueId };
+  }
 
-if (leagueId) {
+  const espnInfo = extractEspnLeagueInfo(window.location.href);
+  if (espnInfo) {
+    return { platform: "espn", leagueId: espnInfo.leagueId, season: espnInfo.season };
+  }
+
+  return null;
+}
+
+const league = detectLeague();
+
+if (league) {
   const host = document.createElement("div");
   host.id = "gridlytics-host";
   document.body.appendChild(host);
@@ -13,5 +28,5 @@ if (leagueId) {
   const container = document.createElement("div");
   shadowRoot.appendChild(container);
 
-  createRoot(container).render(<Overlay leagueId={leagueId} />);
+  createRoot(container).render(<Overlay league={league} />);
 }

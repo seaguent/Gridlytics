@@ -2,9 +2,14 @@
   "manifest_version": 3,
   "name": "Gridlytics",
   "version": "0.1.0",
-  "description": "Fantasy football analytics for Sleeper leagues",
+  "description": "Fantasy football analytics for Sleeper and ESPN leagues",
   "permissions": ["storage"],
-  "host_permissions": ["http://127.0.0.1:8001/*", "https://gridlytics-production.up.railway.app/*"],
+  "host_permissions": [
+    "http://127.0.0.1:8001/*",
+    "https://gridlytics-production.up.railway.app/*",
+    "https://fantasy.espn.com/*",
+    "https://lm-api-reads.fantasy.espn.com/*"
+  ],
   "action": {
     "default_popup": "popup.html"
   },
@@ -13,7 +18,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://sleeper.com/leagues/*", "https://sleeper.app/leagues/*"],
+      "matches": [
+        "https://sleeper.com/leagues/*",
+        "https://sleeper.app/leagues/*",
+        "https://fantasy.espn.com/football/*"
+      ],
       "js": ["content.js"]
     }
   ]
