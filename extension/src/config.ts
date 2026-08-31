@@ -1,1 +1,3 @@
-export const API_BASE_URL = "http://127.0.0.1:8001";
+declare const __API_BASE_URL__: string;
+
+export const API_BASE_URL = __API_BASE_URL__;

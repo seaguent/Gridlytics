@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Fantasy football analytics for Sleeper leagues",
   "permissions": ["storage"],
-  "host_permissions": ["http://127.0.0.1:8001/*"],
+  "host_permissions": ["http://127.0.0.1:8001/*", "https://REPLACE_WITH_RAILWAY_URL/*"],
   "action": {
     "default_popup": "popup.html"
   },

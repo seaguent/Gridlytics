@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -16,12 +18,23 @@ from app.analytics.power_rankings import compute_power_rankings
 from app.analytics.recap import generate_weekly_recap
 from app.analytics.roster import compute_bench_points, compute_roster_efficiency, summarize_roster_efficiency
 from app.analytics.standings import compute_expected_wins, compute_schedule_strength
+from app.db import engine
 from app.deps import get_fresh_league, get_session
-from app.models import League, LeagueConnection, Team
+from app.models import Base, League, LeagueConnection, Team
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
 
-app = FastAPI(title="Gridlytics API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # No real migration tool yet (that's Phase 20) -- create_all is safe to
+    # run on every startup since it only creates tables that don't exist.
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+
+app = FastAPI(title="Gridlytics API", lifespan=lifespan)
 
 
 @app.get("/health")
