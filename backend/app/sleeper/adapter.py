@@ -1,3 +1,5 @@
+from datetime import datetime, UTC
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,10 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
             name=raw_league.name,
             status=raw_league.status,
             roster_positions=raw_league.roster_positions,
+            current_week=raw_league.settings.leg,
+            playoff_teams=raw_league.settings.playoff_teams,
+            playoff_week_start=raw_league.settings.playoff_week_start,
+            last_synced_at=datetime.now(UTC).replace(tzinfo=None),
         )
         session.add(league)
         await session.flush()
@@ -35,6 +41,10 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
         league.name = raw_league.name
         league.status = raw_league.status
         league.roster_positions = raw_league.roster_positions
+        league.current_week = raw_league.settings.leg
+        league.playoff_teams = raw_league.settings.playoff_teams
+        league.playoff_week_start = raw_league.settings.playoff_week_start
+        league.last_synced_at = datetime.now(UTC).replace(tzinfo=None)
 
     for raw_roster in raw_rosters:
         result = await session.execute(

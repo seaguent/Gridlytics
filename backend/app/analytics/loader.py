@@ -2,7 +2,8 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Matchup, RosterSlot, Team, WeeklyScore
+from app.analytics.standings import compute_expected_wins, compute_recent_form
+from app.models import League, Matchup, RosterSlot, Team, WeeklyScore
 
 DEFAULT_MEAN = 100.0
 DEFAULT_STD = 15.0
@@ -93,3 +94,60 @@ async def load_simulation_inputs(session: AsyncSession, league_id: int) -> tuple
         team_score_dist[team.id] = {"mean": mean, "std": std}
 
     return current_records, team_score_dist
+
+
+async def load_power_ranking_inputs(session: AsyncSession, league_id: int) -> pd.DataFrame:
+    result = await session.execute(select(Team).where(Team.league_id == league_id))
+    teams = result.scalars().all()
+
+    scores = await load_weekly_scores(session, league_id)
+    expected_wins = compute_expected_wins(scores) if len(scores) else {}
+    recent_form = compute_recent_form(scores) if len(scores) else {}
+
+    records = []
+    for team in teams:
+        games_played = team.wins + team.losses + team.ties
+        win_pct = team.wins / games_played if games_played else 0.0
+        points_per_game = team.points_for / games_played if games_played else 0.0
+        expected_win_pct = (
+            expected_wins.get(team.id, 0.0) / games_played if games_played else 0.0
+        )
+        records.append(
+            {
+                "team_id": team.id,
+                "win_pct": win_pct,
+                "points_per_game": points_per_game,
+                "expected_win_pct": expected_win_pct,
+                "recent_points_per_game": recent_form.get(team.id, 0.0),
+            }
+        )
+
+    return pd.DataFrame(
+        records,
+        columns=[
+            "team_id",
+            "win_pct",
+            "points_per_game",
+            "expected_win_pct",
+            "recent_points_per_game",
+        ],
+    )
+
+
+async def load_remaining_schedule(session: AsyncSession, league: League) -> list[tuple[int, int, int]]:
+    scores = await load_weekly_scores(session, league.id)
+    upcoming = scores[scores["week"] > league.current_week]
+
+    seen_matchups: set[tuple[int, frozenset]] = set()
+    remaining: list[tuple[int, int, int]] = []
+
+    for row in upcoming.itertuples():
+        if row.opponent_team_id is None:
+            continue
+        key = (row.week, frozenset({row.team_id, row.opponent_team_id}))
+        if key in seen_matchups:
+            continue
+        seen_matchups.add(key)
+        remaining.append((row.week, row.team_id, row.opponent_team_id))
+
+    return remaining

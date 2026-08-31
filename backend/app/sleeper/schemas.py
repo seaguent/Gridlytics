@@ -1,6 +1,14 @@
 from pydantic import BaseModel, ConfigDict
 
 
+class SleeperLeagueSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    leg: int = 1
+    playoff_teams: int = 6
+    playoff_week_start: int = 15
+
+
 class SleeperLeague(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -13,6 +21,7 @@ class SleeperLeague(BaseModel):
     total_rosters: int
     previous_league_id: str | None = None
     roster_positions: list[str] = []
+    settings: SleeperLeagueSettings = SleeperLeagueSettings()
 
 
 class SleeperRosterSettings(BaseModel):

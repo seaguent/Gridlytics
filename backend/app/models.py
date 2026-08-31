@@ -19,10 +19,15 @@ class League(Base):
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32))
     roster_positions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    current_week: Mapped[int] = mapped_column(default=1)
+    playoff_teams: Mapped[int] = mapped_column(default=6)
+    playoff_week_start: Mapped[int] = mapped_column(default=15)
+    last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     teams: Mapped[list["Team"]] = relationship(back_populates="league")
     matchups: Mapped[list["Matchup"]] = relationship(back_populates="league")
+    connections: Mapped[list["LeagueConnection"]] = relationship(back_populates="league")
 
 
 class Team(Base):
@@ -90,3 +95,14 @@ class Player(Base):
     position: Mapped[str] = mapped_column(String(16))
     name: Mapped[str] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class LeagueConnection(Base):
+    __tablename__ = "league_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    league_id: Mapped[int] = mapped_column(ForeignKey("leagues.id"))
+    access_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    league: Mapped["League"] = relationship(back_populates="connections")

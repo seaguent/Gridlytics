@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app.analytics.standings import compute_expected_wins, compute_schedule_strength
+from app.analytics.standings import compute_expected_wins, compute_recent_form, compute_schedule_strength
 
 
 @pytest.fixture
@@ -65,3 +65,22 @@ def test_schedule_strength_matches_hand_calculation(two_week_scores_with_opponen
     assert strength["B"] == pytest.approx(81.25, abs=0.01)
     assert strength["C"] == pytest.approx(81.25, abs=0.01)
     assert strength["D"] == pytest.approx(88.75, abs=0.01)
+
+
+def test_recent_form_only_uses_the_last_n_weeks():
+    scores = pd.DataFrame(
+        [
+            {"team_id": "A", "week": 1, "points": 50},
+            {"team_id": "A", "week": 2, "points": 100},
+            {"team_id": "A", "week": 3, "points": 110},
+            {"team_id": "B", "week": 1, "points": 200},
+            {"team_id": "B", "week": 2, "points": 60},
+            {"team_id": "B", "week": 3, "points": 70},
+        ]
+    )
+
+    # num_weeks=2 -> only weeks 2 and 3 count, week 1 is ignored for both teams.
+    form = compute_recent_form(scores, num_weeks=2)
+
+    assert form["A"] == pytest.approx((100 + 110) / 2)
+    assert form["B"] == pytest.approx((60 + 70) / 2)
