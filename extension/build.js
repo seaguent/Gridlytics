@@ -1,6 +1,6 @@
 import * as esbuild from "esbuild";
 
-const PRODUCTION_API_URL = "https://REPLACE_WITH_RAILWAY_URL";
+const PRODUCTION_API_URL = "https://gridlytics-production.up.railway.app";
 const DEV_API_URL = "http://127.0.0.1:8001";
 
 const isDev = process.env.GRIDLYTICS_ENV === "development";
