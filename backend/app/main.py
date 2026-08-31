@@ -23,6 +23,11 @@ from app.deps import get_current_league, get_fresh_league, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
 from app.models import Base, League, LeagueConnection, Team
+from app.projections.ensemble import EnsembleProjectionProvider
+from app.projections.espn import ESPNProjectionProvider
+from app.projections.historical import HistoricalAverageProjectionProvider
+from app.projections.sleeper import SleeperProjectionProvider
+from app.projections.value import compute_value_over_replacement
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
 
@@ -266,3 +271,73 @@ async def get_weekly_recap(
         "unluckiest_team": named(recap["unluckiest_team"], "team_id"),
         "worst_bench_decision": named(recap["worst_bench_decision"], "team_id"),
     }
+
+
+@app.get("/leagues/me/projections")
+async def get_projections(
+    league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
+) -> list[dict]:
+    provider = EnsembleProjectionProvider(
+        [ESPNProjectionProvider(), SleeperProjectionProvider(), HistoricalAverageProjectionProvider()]
+    )
+    projections = await provider.get_projections(session, league)
+
+    rows = [
+        {
+            "platform_player_id": p.platform_player_id,
+            "name": p.name,
+            "position": p.position,
+            "projected_points": p.projected_points,
+            "sources": p.sources,
+            "floor": p.floor,
+            "ceiling": p.ceiling,
+            "confidence": p.confidence,
+        }
+        for p in projections
+    ]
+    return sorted(rows, key=lambda row: row["projected_points"], reverse=True)
+
+
+@app.get("/leagues/me/rankings")
+async def get_rankings(
+    position: str | None = None,
+    league: League = Depends(get_fresh_league),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    provider = EnsembleProjectionProvider(
+        [ESPNProjectionProvider(), SleeperProjectionProvider(), HistoricalAverageProjectionProvider()]
+    )
+    projections = await provider.get_projections(session, league)
+    if not projections:
+        return []
+
+    result = await session.execute(select(Team).where(Team.league_id == league.id))
+    num_teams = len(result.scalars().all())
+
+    vor = compute_value_over_replacement(projections, league.roster_positions, num_teams)
+    vor_values = list(vor.values())
+    vor_min, vor_max = min(vor_values), max(vor_values)
+    vor_range = vor_max - vor_min
+
+    rows = []
+    for p in projections:
+        player_vor = vor.get(p.platform_player_id, 0.0)
+        value_score = 50.0 if vor_range == 0 else (player_vor - vor_min) / vor_range * 100
+        rows.append(
+            {
+                "platform_player_id": p.platform_player_id,
+                "name": p.name,
+                "position": p.position,
+                "projected_points": p.projected_points,
+                "value_over_replacement": player_vor,
+                "value_score": value_score,
+                "floor": p.floor,
+                "ceiling": p.ceiling,
+                "confidence": p.confidence,
+            }
+        )
+
+    if position:
+        rows = [row for row in rows if row["position"] == position.upper()]
+
+    return sorted(rows, key=lambda row: row["value_score"], reverse=True)

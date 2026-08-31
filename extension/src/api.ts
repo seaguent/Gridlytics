@@ -70,6 +70,18 @@ export interface WeeklyRecap {
   worst_bench_decision: RecapHighlight | null;
 }
 
+export interface RankingRow {
+  platform_player_id: string;
+  name: string;
+  position: string;
+  projected_points: number;
+  value_over_replacement: number;
+  value_score: number;
+  floor: number | null;
+  ceiling: number | null;
+  confidence: number | null;
+}
+
 interface ApiGetResponse<T> {
   ok: boolean;
   data?: T;
@@ -111,4 +123,9 @@ export function fetchRosterEfficiency(token: string): Promise<EfficiencyRow[]> {
 
 export function fetchWeeklyRecap(token: string, week: number): Promise<WeeklyRecap> {
   return fetchJson(`/leagues/me/recap/${week}`, token);
+}
+
+export function fetchRankings(token: string, position?: string): Promise<RankingRow[]> {
+  const query = position ? `?position=${position}` : "";
+  return fetchJson(`/leagues/me/rankings${query}`, token);
 }

@@ -19,6 +19,7 @@ class League(Base):
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32))
     roster_positions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    scoring_settings: Mapped[dict] = mapped_column(JSON, default=dict)
     current_week: Mapped[int] = mapped_column(default=1)
     playoff_teams: Mapped[int] = mapped_column(default=6)
     playoff_week_start: Mapped[int] = mapped_column(default=15)
@@ -94,6 +95,20 @@ class Player(Base):
     platform_player_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     position: Mapped[str] = mapped_column(String(16))
     name: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class ProjectionRecord(Base):
+    __tablename__ = "projection_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    league_id: Mapped[int] = mapped_column(ForeignKey("leagues.id"))
+    platform_player_id: Mapped[str] = mapped_column(String(32))
+    week: Mapped[int]
+    source: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(255))
+    position: Mapped[str] = mapped_column(String(16))
+    projected_points: Mapped[float]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 

@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import League, Player
-from app.sleeper.adapter import sync_league, sync_week
+from app.sleeper.adapter import sync_league, sync_projections, sync_week
 from app.sleeper.client import SleeperClient
 from app.sleeper.players import sync_players
 
@@ -24,5 +24,7 @@ async def refresh_league(session: AsyncSession, client: SleeperClient, league_id
 
     for week in range(1, league.playoff_week_start):
         await sync_week(session, client, league, week)
+
+    await sync_projections(session, client, league)
 
     return league

@@ -102,3 +102,43 @@ def parse_rosters(raw: EspnLeagueResponse) -> list[dict]:
                 }
             )
     return roster_slots
+
+
+PROJECTED_STAT_SOURCE_ID = 1
+
+
+def parse_projections(raw: EspnLeagueResponse) -> list[dict]:
+    current_period = raw.status.currentMatchupPeriod
+    seen_player_ids: set[str] = set()
+    projections = []
+
+    for team in raw.teams:
+        for entry in team.roster.entries:
+            platform_player_id = str(entry.playerId)
+            if platform_player_id in seen_player_ids:
+                continue
+
+            player = entry.playerPoolEntry.player
+            projected_stat = next(
+                (
+                    stat
+                    for stat in player.stats
+                    if stat.statSourceId == PROJECTED_STAT_SOURCE_ID
+                    and stat.scoringPeriodId == current_period
+                    and stat.appliedTotal is not None
+                ),
+                None,
+            )
+            if projected_stat is None:
+                continue
+
+            seen_player_ids.add(platform_player_id)
+            projections.append(
+                {
+                    "platform_player_id": platform_player_id,
+                    "name": player.fullName or f"Player {entry.playerId}",
+                    "position": POSITION_ID_MAP.get(player.defaultPositionId, "UNKNOWN"),
+                    "projected_points": projected_stat.appliedTotal,
+                }
+            )
+    return projections

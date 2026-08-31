@@ -341,3 +341,25 @@
   font-size: 13px;
   color: var(--gl-text-muted);
 }
+
+.gl-position-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.gl-position {
+  background: var(--gl-bg-card);
+  border: none;
+  color: var(--gl-text-muted);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gl-position--active {
+  background: var(--gl-accent);
+  color: white;
+}

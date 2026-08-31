@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import overlayStyles from "../overlay.css";
-import { fetchLeagueInfo, fetchWeeklyRecap, LeagueInfo, WeeklyRecap } from "../api";
+import { fetchLeagueInfo, fetchRankings, fetchWeeklyRecap, LeagueInfo, RankingRow, WeeklyRecap } from "../api";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { Efficiency } from "./Efficiency";
 import { PlayoffOdds } from "./PlayoffOdds";
 import { PowerRankings } from "./PowerRankings";
+import { Rankings } from "./Rankings";
 import { Recap } from "./Recap";
 import { Standings } from "./Standings";
 
@@ -17,7 +18,7 @@ function formatSubtitle(info: LeagueInfo): string {
   return `${info.name} · ${period}`;
 }
 
-type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap";
+type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings";
 
 interface ConnectResponse {
   ok: boolean;
@@ -47,6 +48,10 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   const [recap, setRecap] = useState<WeeklyRecap | null>(null);
   const [recapError, setRecapError] = useState<string | null>(null);
 
+  const [rankingsPosition, setRankingsPosition] = useState("ALL");
+  const [rankings, setRankings] = useState<RankingRow[] | null>(null);
+  const [rankingsError, setRankingsError] = useState<string | null>(null);
+
   const storageKey = `token:${league.platform}:${league.leagueId}`;
 
   useEffect(() => {
@@ -75,6 +80,15 @@ export function Overlay({ league }: { league: OverlayLeague }) {
       .then(setRecap)
       .catch(() => setRecapError(`No recap data for week ${recapWeek} yet.`));
   }, [token, recapWeek]);
+
+  useEffect(() => {
+    if (!token || tab !== "rankings") return;
+    setRankingsError(null);
+    const position = rankingsPosition === "ALL" ? undefined : rankingsPosition;
+    fetchRankings(token, position)
+      .then(setRankings)
+      .catch((err: Error) => setRankingsError(err.message));
+  }, [token, tab, rankingsPosition]);
 
   const { standings, powerRankings, playoffOdds, efficiency, error } = useAnalytics(token);
 
@@ -191,16 +205,22 @@ export function Overlay({ league }: { league: OverlayLeague }) {
               >
                 Recap
               </button>
+              <button
+                className={tab === "rankings" ? "gl-tab gl-tab--active" : "gl-tab"}
+                onClick={() => setTab("rankings")}
+              >
+                Players
+              </button>
             </div>
 
             {connectError && <div className="gl-error">{connectError}</div>}
 
             <div className="gl-body">
-              {tab !== "recap" && error && <div className="gl-error">{error}</div>}
-              {tab !== "recap" && !error && !dataReady && (
+              {tab !== "recap" && tab !== "rankings" && error && <div className="gl-error">{error}</div>}
+              {tab !== "recap" && tab !== "rankings" && !error && !dataReady && (
                 <div className="gl-loading">Loading...</div>
               )}
-              {tab !== "recap" && dataReady && (
+              {tab !== "recap" && tab !== "rankings" && dataReady && (
                 <>
                   {tab === "standings" && <Standings rows={standings} />}
                   {tab === "power" && <PowerRankings rows={powerRankings} />}
@@ -230,6 +250,20 @@ export function Overlay({ league }: { league: OverlayLeague }) {
                   {recapError && <div className="gl-error">{recapError}</div>}
                   {!recapError && !recap && <div className="gl-loading">Loading...</div>}
                   {recap && <Recap recap={recap} />}
+                </>
+              )}
+
+              {tab === "rankings" && (
+                <>
+                  {rankingsError && <div className="gl-error">{rankingsError}</div>}
+                  {!rankingsError && !rankings && <div className="gl-loading">Loading...</div>}
+                  {rankings && (
+                    <Rankings
+                      rows={rankings}
+                      position={rankingsPosition}
+                      onPositionChange={setRankingsPosition}
+                    />
+                  )}
                 </>
               )}
             </div>

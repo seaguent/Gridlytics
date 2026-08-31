@@ -1,11 +1,20 @@
 from pydantic import BaseModel, ConfigDict
 
 
+class EspnPlayerStat(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    scoringPeriodId: int | None = None
+    statSourceId: int | None = None
+    appliedTotal: float | None = None
+
+
 class EspnPlayer(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     fullName: str | None = None
     defaultPositionId: int | None = None
+    stats: list[EspnPlayerStat] = []
 
 
 class EspnPlayerPoolEntry(BaseModel):

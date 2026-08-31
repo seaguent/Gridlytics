@@ -3,7 +3,8 @@ from datetime import datetime, UTC
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import League, Matchup, RosterSlot, Team, WeeklyScore
+from app.models import League, Matchup, ProjectionRecord, RosterSlot, Team, WeeklyScore
+from app.projections.value import FIXED_POSITIONS
 from app.sleeper.client import SleeperClient
 
 
@@ -30,6 +31,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
             name=raw_league.name,
             status=raw_league.status,
             roster_positions=raw_league.roster_positions,
+            scoring_settings=raw_league.scoring_settings,
             current_week=raw_league.settings.leg,
             playoff_teams=raw_league.settings.playoff_teams,
             playoff_week_start=raw_league.settings.playoff_week_start,
@@ -42,6 +44,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
         league.name = raw_league.name
         league.status = raw_league.status
         league.roster_positions = raw_league.roster_positions
+        league.scoring_settings = raw_league.scoring_settings
         league.current_week = raw_league.settings.leg
         league.playoff_teams = raw_league.settings.playoff_teams
         league.playoff_week_start = raw_league.settings.playoff_week_start
@@ -156,5 +159,66 @@ async def sync_week(
             else:
                 slot.is_starter = is_starter
                 slot.points = points
+
+    await session.commit()
+
+
+def _scoring_field(scoring_settings: dict) -> str:
+    rec = scoring_settings.get("rec", 0)
+    if rec >= 0.75:
+        return "pts_ppr"
+    if rec >= 0.25:
+        return "pts_half_ppr"
+    return "pts_std"
+
+
+async def sync_projections(session: AsyncSession, client: SleeperClient, league: League) -> None:
+    raw_rosters = await client.get_rosters(league.platform_league_id)
+    rostered_player_ids = {
+        platform_player_id for roster in raw_rosters for platform_player_id in roster.players
+    }
+    if not rostered_player_ids:
+        return
+
+    raw_projections = await client.get_projections(league.season, league.current_week)
+    field = _scoring_field(league.scoring_settings)
+
+    for raw in raw_projections:
+        if raw.player is None or raw.player.position not in FIXED_POSITIONS:
+            continue
+        if raw.player_id not in rostered_player_ids:
+            continue
+
+        points = getattr(raw.stats, field)
+        if points is None:
+            continue
+
+        name = f"{raw.player.first_name or ''} {raw.player.last_name or ''}".strip() or raw.player_id
+
+        result = await session.execute(
+            select(ProjectionRecord).where(
+                ProjectionRecord.league_id == league.id,
+                ProjectionRecord.platform_player_id == raw.player_id,
+                ProjectionRecord.week == league.current_week,
+                ProjectionRecord.source == "sleeper",
+            )
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            session.add(
+                ProjectionRecord(
+                    league_id=league.id,
+                    platform_player_id=raw.player_id,
+                    week=league.current_week,
+                    source="sleeper",
+                    name=name,
+                    position=raw.player.position,
+                    projected_points=points,
+                )
+            )
+        else:
+            record.projected_points = points
+            record.name = name
+            record.position = raw.player.position
 
     await session.commit()

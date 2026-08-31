@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from app.sleeper.client import SLEEPER_BASE_URL, SleeperClient
+from app.sleeper.client import SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE_URL, SleeperClient
 
 
 @pytest.mark.asyncio
@@ -148,3 +148,36 @@ async def test_get_all_players_parses_dict_keyed_by_player_id():
     assert len(players) == 2
     assert players["100"].position == "RB"
     assert players["200"].full_name == "San Francisco 49ers"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_projections_parses_list():
+    respx.get(f"{SLEEPER_PROJECTIONS_BASE_URL}/2026/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "player_id": "7039",
+                    "week": 1,
+                    "stats": {"pts_std": 8.5, "pts_half_ppr": 10.6, "pts_ppr": 12.7},
+                    "player": {"first_name": "Cody", "last_name": "White", "position": "WR"},
+                },
+                {
+                    "player_id": "KC",
+                    "week": 1,
+                    "stats": {"pts_std": 8.12, "pts_half_ppr": 8.12, "pts_ppr": 8.12},
+                    "player": {"first_name": "Kansas City", "last_name": "Chiefs", "position": "DEF"},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    projections = await client.get_projections("2026", 1)
+    await client.aclose()
+
+    assert len(projections) == 2
+    assert projections[0].player_id == "7039"
+    assert projections[0].stats.pts_half_ppr == 10.6
+    assert projections[0].player.position == "WR"

@@ -22,6 +22,7 @@ class SleeperLeague(BaseModel):
     previous_league_id: str | None = None
     roster_positions: list[str] = []
     settings: SleeperLeagueSettings = SleeperLeagueSettings()
+    scoring_settings: dict = {}
 
 
 class SleeperRosterSettings(BaseModel):
@@ -71,3 +72,28 @@ class SleeperPlayer(BaseModel):
 
     position: str | None = None
     full_name: str | None = None
+
+
+class SleeperProjectionStats(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    pts_std: float | None = None
+    pts_half_ppr: float | None = None
+    pts_ppr: float | None = None
+
+
+class SleeperProjectionPlayer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    first_name: str | None = None
+    last_name: str | None = None
+    position: str | None = None
+
+
+class SleeperProjection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    player_id: str
+    week: int
+    stats: SleeperProjectionStats = SleeperProjectionStats()
+    player: SleeperProjectionPlayer | None = None

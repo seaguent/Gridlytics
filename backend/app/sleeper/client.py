@@ -4,11 +4,13 @@ from app.sleeper.schemas import (
     SleeperLeague,
     SleeperMatchup,
     SleeperPlayer,
+    SleeperProjection,
     SleeperRoster,
     SleeperUser,
 )
 
 SLEEPER_BASE_URL = "https://api.sleeper.app/v1"
+SLEEPER_PROJECTIONS_BASE_URL = "https://api.sleeper.app/projections/nfl"
 
 
 class SleeperClient:
@@ -42,6 +44,15 @@ class SleeperClient:
             player_id: SleeperPlayer.model_validate(data)
             for player_id, data in response.json().items()
         }
+
+    async def get_projections(self, season: str, week: int) -> list[SleeperProjection]:
+        response = await self._client.get(
+            f"{SLEEPER_PROJECTIONS_BASE_URL}/{season}/{week}",
+            params={"season_type": "regular"},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return [SleeperProjection.model_validate(item) for item in response.json()]
 
     async def aclose(self) -> None:
         await self._client.aclose()

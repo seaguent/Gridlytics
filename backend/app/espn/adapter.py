@@ -3,9 +3,9 @@ from datetime import datetime, UTC
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.espn.parser import parse_league, parse_matchups, parse_rosters, parse_teams
+from app.espn.parser import parse_league, parse_matchups, parse_projections, parse_rosters, parse_teams
 from app.espn.schemas import EspnLeagueResponse
-from app.models import League, Matchup, Player, RosterSlot, Team, WeeklyScore
+from app.models import League, Matchup, Player, ProjectionRecord, RosterSlot, Team, WeeklyScore
 
 
 async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
@@ -139,6 +139,33 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             )
         else:
             slot.is_starter = roster_fields["is_starter"]
+
+    for projection_fields in parse_projections(raw):
+        result = await session.execute(
+            select(ProjectionRecord).where(
+                ProjectionRecord.league_id == league.id,
+                ProjectionRecord.platform_player_id == projection_fields["platform_player_id"],
+                ProjectionRecord.week == league.current_week,
+                ProjectionRecord.source == "espn",
+            )
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            session.add(
+                ProjectionRecord(
+                    league_id=league.id,
+                    platform_player_id=projection_fields["platform_player_id"],
+                    week=league.current_week,
+                    source="espn",
+                    name=projection_fields["name"],
+                    position=projection_fields["position"],
+                    projected_points=projection_fields["projected_points"],
+                )
+            )
+        else:
+            record.projected_points = projection_fields["projected_points"]
+            record.name = projection_fields["name"]
+            record.position = projection_fields["position"]
 
     await session.commit()
     return league

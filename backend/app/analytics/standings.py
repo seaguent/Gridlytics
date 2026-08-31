@@ -20,7 +20,7 @@ def compute_schedule_strength(scores: pd.DataFrame) -> dict:
     ].mean().to_dict()
 
 
-def compute_recent_form(scores: pd.DataFrame, num_weeks: int = 3) -> dict:
+def compute_recent_form(scores: pd.DataFrame, num_weeks: int = 3, group_by: str = "team_id") -> dict:
     recent_weeks = sorted(scores["week"].unique())[-num_weeks:]
     recent = scores[scores["week"].isin(recent_weeks)]
-    return recent.groupby("team_id")["points"].mean().to_dict()
+    return recent.groupby(group_by)["points"].mean().to_dict()

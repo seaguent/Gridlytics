@@ -3,9 +3,9 @@ import pytest
 import respx
 from sqlalchemy import select
 
-from app.models import Matchup, RosterSlot, Team, WeeklyScore
-from app.sleeper.adapter import sync_league, sync_week
-from app.sleeper.client import SLEEPER_BASE_URL, SleeperClient
+from app.models import Matchup, ProjectionRecord, RosterSlot, Team, WeeklyScore
+from app.sleeper.adapter import sync_league, sync_projections, sync_week
+from app.sleeper.client import SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE_URL, SleeperClient
 
 
 def _mock_sleeper_league(league_id: str) -> None:
@@ -228,3 +228,102 @@ async def test_sync_week_roster_slots_is_idempotent(db_session):
 
     result = await db_session.execute(select(RosterSlot))
     assert len(result.scalars().all()) == 3
+
+
+def _mock_sleeper_rosters_with_players(league_id: str) -> None:
+    respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}/rosters").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "owner_id": "u1",
+                    "league_id": league_id,
+                    "players": ["7039", "KC"],
+                    "starters": [],
+                    "settings": {"wins": 0, "losses": 0, "ties": 0},
+                },
+            ],
+        )
+    )
+
+
+def _mock_sleeper_projections(league_id: str, season: str, week: int) -> None:
+    respx.get(f"{SLEEPER_PROJECTIONS_BASE_URL}/{season}/{week}").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "player_id": "7039",
+                    "week": week,
+                    "stats": {"pts_std": 8.5, "pts_half_ppr": 10.6, "pts_ppr": 12.7},
+                    "player": {"first_name": "Cody", "last_name": "White", "position": "WR"},
+                },
+                {
+                    "player_id": "KC",
+                    "week": week,
+                    "stats": {"pts_std": 8.12, "pts_half_ppr": 8.12, "pts_ppr": 8.12},
+                    "player": {"first_name": "Kansas City", "last_name": "Chiefs", "position": "DEF"},
+                },
+                {
+                    # not rostered in this league -- should be skipped
+                    "player_id": "9999",
+                    "week": week,
+                    "stats": {"pts_std": 20.0, "pts_half_ppr": 20.0, "pts_ppr": 20.0},
+                    "player": {"first_name": "Somebody", "last_name": "Else", "position": "WR"},
+                },
+                {
+                    # offensive lineman -- not a fantasy-relevant position, should be skipped
+                    "player_id": "8888",
+                    "week": week,
+                    "stats": {"pts_std": 0.0, "pts_half_ppr": 0.0, "pts_ppr": 0.0},
+                    "player": {"first_name": "Some", "last_name": "Lineman", "position": "OL"},
+                },
+            ],
+        )
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_projections_persists_rostered_players_at_league_scoring_format(db_session):
+    _mock_sleeper_league("123")
+    _mock_sleeper_rosters_with_players("123")
+    _mock_sleeper_projections("123", "2026", 1)
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, "123")
+    league.scoring_settings = {"rec": 0.5}
+    await sync_projections(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(ProjectionRecord.source == "sleeper")
+    )
+    records = {r.platform_player_id: r for r in result.scalars().all()}
+
+    assert len(records) == 2
+    assert records["7039"].projected_points == 10.6
+    assert records["7039"].name == "Cody White"
+    assert records["KC"].projected_points == 8.12
+    assert "9999" not in records
+    assert "8888" not in records
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_projections_is_idempotent(db_session):
+    _mock_sleeper_league("123")
+    _mock_sleeper_rosters_with_players("123")
+    _mock_sleeper_projections("123", "2026", 1)
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, "123")
+    await sync_projections(db_session, client, league)
+    await sync_projections(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(ProjectionRecord.source == "sleeper")
+    )
+    assert len(result.scalars().all()) == 2
