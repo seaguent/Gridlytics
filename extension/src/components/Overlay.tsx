@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import overlayStyles from "../overlay.css";
-import { fetchLeagueInfo, fetchRankings, fetchWeeklyRecap, LeagueInfo, RankingRow, WeeklyRecap } from "../api";
+import {
+  fetchLeagueInfo,
+  fetchRankings,
+  fetchStartSit,
+  fetchWeeklyRecap,
+  LeagueInfo,
+  RankingRow,
+  setMyTeam,
+  StartSitResponse,
+  WeeklyRecap,
+} from "../api";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { Efficiency } from "./Efficiency";
 import { PlayoffOdds } from "./PlayoffOdds";
@@ -8,6 +18,8 @@ import { PowerRankings } from "./PowerRankings";
 import { Rankings } from "./Rankings";
 import { Recap } from "./Recap";
 import { Standings } from "./Standings";
+import { StartSit } from "./StartSit";
+import { TeamPicker } from "./TeamPicker";
 
 export type OverlayLeague =
   | { platform: "sleeper"; leagueId: string }
@@ -18,7 +30,7 @@ function formatSubtitle(info: LeagueInfo): string {
   return `${info.name} · ${period}`;
 }
 
-type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings";
+type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings" | "startSit";
 
 interface ConnectResponse {
   ok: boolean;
@@ -52,6 +64,12 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   const [rankings, setRankings] = useState<RankingRow[] | null>(null);
   const [rankingsError, setRankingsError] = useState<string | null>(null);
 
+  const [startSit, setStartSit] = useState<StartSitResponse | null>(null);
+  const [startSitError, setStartSitError] = useState<string | null>(null);
+  const [settingTeam, setSettingTeam] = useState(false);
+
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const storageKey = `token:${league.platform}:${league.leagueId}`;
 
   useEffect(() => {
@@ -64,7 +82,7 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   useEffect(() => {
     if (!token) return;
     fetchLeagueInfo(token).then(setLeagueInfo).catch(() => {});
-  }, [token]);
+  }, [token, refreshKey]);
 
   useEffect(() => {
     if (recapWeek === null && leagueInfo) {
@@ -79,7 +97,7 @@ export function Overlay({ league }: { league: OverlayLeague }) {
     fetchWeeklyRecap(token, recapWeek)
       .then(setRecap)
       .catch(() => setRecapError(`No recap data for week ${recapWeek} yet.`));
-  }, [token, recapWeek]);
+  }, [token, recapWeek, refreshKey]);
 
   useEffect(() => {
     if (!token || tab !== "rankings") return;
@@ -88,9 +106,31 @@ export function Overlay({ league }: { league: OverlayLeague }) {
     fetchRankings(token, position)
       .then(setRankings)
       .catch((err: Error) => setRankingsError(err.message));
-  }, [token, tab, rankingsPosition]);
+  }, [token, tab, rankingsPosition, refreshKey]);
 
-  const { standings, powerRankings, playoffOdds, efficiency, error } = useAnalytics(token);
+  useEffect(() => {
+    if (!token || tab !== "startSit" || !leagueInfo?.my_team_id) return;
+    setStartSit(null);
+    setStartSitError(null);
+    fetchStartSit(token)
+      .then(setStartSit)
+      .catch((err: Error) => setStartSitError(err.message));
+  }, [token, tab, leagueInfo?.my_team_id, refreshKey]);
+
+  const { standings, powerRankings, playoffOdds, efficiency, error } = useAnalytics(token, refreshKey);
+
+  const handleSelectTeam = async (teamId: number) => {
+    if (!token) return;
+    setSettingTeam(true);
+    try {
+      await setMyTeam(token, teamId);
+      setLeagueInfo((info) => (info ? { ...info, my_team_id: teamId } : info));
+    } catch (err) {
+      setStartSitError((err as Error).message);
+    } finally {
+      setSettingTeam(false);
+    }
+  };
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -125,7 +165,9 @@ export function Overlay({ league }: { league: OverlayLeague }) {
     setRefreshing(false);
     if (!response?.ok) {
       setConnectError(response?.error ?? "Refresh failed");
+      return;
     }
+    setRefreshKey((key) => key + 1);
   };
 
   const dataReady = standings && powerRankings && playoffOdds && efficiency;
@@ -211,16 +253,24 @@ export function Overlay({ league }: { league: OverlayLeague }) {
               >
                 Players
               </button>
+              <button
+                className={tab === "startSit" ? "gl-tab gl-tab--active" : "gl-tab"}
+                onClick={() => setTab("startSit")}
+              >
+                Start/Sit
+              </button>
             </div>
 
             {connectError && <div className="gl-error">{connectError}</div>}
 
             <div className="gl-body">
-              {tab !== "recap" && tab !== "rankings" && error && <div className="gl-error">{error}</div>}
-              {tab !== "recap" && tab !== "rankings" && !error && !dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && error && (
+                <div className="gl-error">{error}</div>
+              )}
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && !error && !dataReady && (
                 <div className="gl-loading">Loading...</div>
               )}
-              {tab !== "recap" && tab !== "rankings" && dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && dataReady && (
                 <>
                   {tab === "standings" && <Standings rows={standings} />}
                   {tab === "power" && <PowerRankings rows={powerRankings} />}
@@ -269,6 +319,22 @@ export function Overlay({ league }: { league: OverlayLeague }) {
                       position={rankingsPosition}
                       onPositionChange={setRankingsPosition}
                     />
+                  )}
+                </>
+              )}
+
+              {tab === "startSit" && (
+                <>
+                  {!leagueInfo && <div className="gl-loading">Loading...</div>}
+                  {leagueInfo && !leagueInfo.my_team_id && standings && (
+                    <TeamPicker teams={standings} onSelect={handleSelectTeam} saving={settingTeam} />
+                  )}
+                  {leagueInfo && leagueInfo.my_team_id && (
+                    <>
+                      {startSitError && <div className="gl-error">{startSitError}</div>}
+                      {!startSitError && !startSit && <div className="gl-loading">Loading...</div>}
+                      {startSit && <StartSit data={startSit} />}
+                    </>
                   )}
                 </>
               )}

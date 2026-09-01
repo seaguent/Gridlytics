@@ -17,6 +17,18 @@ def _mock_nflverse_season_not_published(season: str) -> None:
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{season}.csv").mock(
         return_value=httpx.Response(404)
     )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/players/players.csv").mock(
+        return_value=httpx.Response(200, text="gsis_id,display_name,espn_id,pfr_id,position\n")
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
+        return_value=httpx.Response(200, text="season,week,home_team,away_team\n")
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{int(season) - 1}.csv").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{int(season) - 1}.csv").mock(
+        return_value=httpx.Response(404)
+    )
 
 
 @pytest_asyncio.fixture
@@ -137,7 +149,113 @@ def test_create_connection_and_fetch_standings(client):
         "current_week": 1,
         "scoring_is_custom": False,
         "scoring_notes": [],
+        "my_team_id": None,
     }
+
+    sean_team_id = next(row["team_id"] for row in standings if row["display_name"] == "sean")
+    set_team_response = client.post(
+        "/leagues/me/my-team",
+        json={"team_id": sean_team_id},
+        headers={"Authorization": "Bearer my-secret-token"},
+    )
+    assert set_team_response.status_code == 200
+    assert set_team_response.json() == {"status": "ok", "my_team_id": sean_team_id}
+
+    info_response = client.get(
+        "/leagues/me", headers={"Authorization": "Bearer my-secret-token"}
+    )
+    assert info_response.json()["my_team_id"] == sean_team_id
+
+
+@respx.mock
+def test_start_sit_requires_a_selected_team(client):
+    _mock_sleeper_league()
+    client.post(
+        "/connections",
+        json={
+            "platform": "sleeper",
+            "platform_league_id": "123",
+            "access_token_hash": hash_token("no-team-token"),
+        },
+    )
+
+    response = client.get(
+        "/leagues/me/start-sit", headers={"Authorization": "Bearer no-team-token"}
+    )
+    assert response.status_code == 400
+
+
+@respx.mock
+def test_start_sit_returns_lineup_once_team_is_selected(client):
+    _mock_sleeper_league()
+    connect_response = client.post(
+        "/connections",
+        json={
+            "platform": "sleeper",
+            "platform_league_id": "123",
+            "access_token_hash": hash_token("start-sit-token"),
+        },
+    )
+    assert connect_response.status_code == 200
+
+    standings = client.get(
+        "/leagues/me/standings", headers={"Authorization": "Bearer start-sit-token"}
+    ).json()
+    sean_team_id = next(row["team_id"] for row in standings if row["display_name"] == "sean")
+    client.post(
+        "/leagues/me/my-team",
+        json={"team_id": sean_team_id},
+        headers={"Authorization": "Bearer start-sit-token"},
+    )
+
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/rosters").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1, "owner_id": "u1", "league_id": "123",
+                    "players": [], "starters": [], "settings": {"wins": 1, "losses": 0, "ties": 0},
+                },
+                {
+                    "roster_id": 2, "owner_id": "u2", "league_id": "123",
+                    "players": [], "starters": [], "settings": {"wins": 0, "losses": 1, "ties": 0},
+                },
+            ],
+        )
+    )
+
+    response = client.get(
+        "/leagues/me/start-sit", headers={"Authorization": "Bearer start-sit-token"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "starters": [],
+        "bench": [],
+        "unavailable": [],
+        "optimal_points": 0.0,
+        "summary": {"changes_count": 0, "current_lineup_points": 0.0, "projected_points_change": 0.0},
+    }
+
+
+@respx.mock
+def test_set_my_team_rejects_team_from_another_league(client):
+    _mock_sleeper_league()
+    client.post(
+        "/connections",
+        json={
+            "platform": "sleeper",
+            "platform_league_id": "123",
+            "access_token_hash": hash_token("wrong-team-token"),
+        },
+    )
+
+    response = client.post(
+        "/leagues/me/my-team",
+        json={"team_id": 999999},
+        headers={"Authorization": "Bearer wrong-team-token"},
+    )
+    assert response.status_code == 400
 
 
 @respx.mock

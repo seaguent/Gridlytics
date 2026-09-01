@@ -379,6 +379,153 @@
   margin-bottom: 10px;
 }
 
+.gl-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gl-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 14px 0 6px;
+}
+
+.gl-section-label:first-child {
+  margin-top: 0;
+}
+
+.gl-reasons {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gl-reasons li {
+  font-size: 11px;
+  color: var(--gl-text-muted);
+  line-height: 1.4;
+}
+
+.gl-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.gl-label {
+  background: var(--gl-accent-soft);
+  color: var(--gl-accent);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.gl-close-call {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fbbf24;
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.gl-comparison-note {
+  font-size: 11px;
+  color: var(--gl-text-muted);
+  margin-top: 4px;
+}
+
+.gl-summary-banner {
+  background: var(--gl-accent-soft);
+  color: var(--gl-accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.gl-summary-banner--optimal {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+}
+
+.gl-action-badge {
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.gl-action-badge--swap {
+  background: var(--gl-accent);
+  color: white;
+}
+
+.gl-action-badge--confirmed {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+}
+
+.gl-action-badge--out {
+  background: rgba(139, 152, 174, 0.16);
+  color: var(--gl-text-muted);
+}
+
+.gl-row--swap {
+  border: 1px solid var(--gl-accent);
+}
+
+.gl-swap-headline {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gl-details {
+  margin-top: 8px;
+}
+
+.gl-details summary {
+  font-size: 11px;
+  color: var(--gl-text-muted);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.gl-details .gl-reasons {
+  margin-top: 6px;
+}
+
+.gl-team-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gl-team-picker-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gl-team-picker-select {
+  background: var(--gl-bg-card);
+  color: var(--gl-text);
+  border: 1px solid var(--gl-border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
+}
+
 .gl-injury {
   background: rgba(248, 113, 113, 0.16);
   color: #f87171;

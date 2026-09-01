@@ -19,7 +19,7 @@ from app.analytics.recap import generate_weekly_recap
 from app.analytics.roster import compute_bench_points, compute_roster_efficiency, summarize_roster_efficiency
 from app.analytics.standings import compute_expected_wins, compute_schedule_strength
 from app.db import engine
-from app.deps import get_current_league, get_fresh_league, get_session
+from app.deps import get_current_connection, get_current_league, get_fresh_league, get_my_team, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
 from app.models import Base, League, LeagueConnection, Team
@@ -29,7 +29,10 @@ from app.projections.ensemble import EnsembleProjectionProvider
 from app.projections.espn import ESPNProjectionProvider
 from app.projections.historical import HistoricalAverageProjectionProvider
 from app.projections.nflverse_metrics import NflverseMetricsProvider
+from app.projections.rows import metrics_to_dict
 from app.projections.sleeper import SleeperProjectionProvider
+from app.projections.start_sit import compute_start_sit
+from app.projections.uncertainty_pipeline import apply_uncertainty_ranges
 from app.projections.value import compute_value_over_replacement
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
@@ -46,7 +49,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Gridlytics API", lifespan=lifespan)
 
-NO_USAGE_TRACKING_POSITIONS = {"DEF", "K"}
 
 
 @app.get("/health")
@@ -135,7 +137,10 @@ async def resync_espn_league(
 
 
 @app.get("/leagues/me")
-async def get_league_info(league: League = Depends(get_fresh_league)) -> dict:
+async def get_league_info(
+    league: League = Depends(get_fresh_league),
+    connection: LeagueConnection = Depends(get_current_connection),
+) -> dict:
     scoring_is_custom = False
     scoring_notes: list[str] = []
     if league.platform == "sleeper":
@@ -148,7 +153,31 @@ async def get_league_info(league: League = Depends(get_fresh_league)) -> dict:
         "current_week": league.current_week,
         "scoring_is_custom": scoring_is_custom,
         "scoring_notes": scoring_notes,
+        "my_team_id": connection.my_team_id,
     }
+
+
+class SetMyTeamRequest(BaseModel):
+    team_id: int
+
+
+@app.post("/leagues/me/my-team")
+async def set_my_team(
+    body: SetMyTeamRequest,
+    league: League = Depends(get_fresh_league),
+    connection: LeagueConnection = Depends(get_current_connection),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    result = await session.execute(
+        select(Team).where(Team.id == body.team_id, Team.league_id == league.id)
+    )
+    team = result.scalar_one_or_none()
+    if team is None:
+        raise HTTPException(status_code=400, detail="Team does not belong to this league")
+
+    connection.my_team_id = team.id
+    await session.commit()
+    return {"status": "ok", "my_team_id": team.id}
 
 
 @app.get("/leagues/me/standings")
@@ -306,6 +335,7 @@ async def get_projections(
         [ESPNProjectionProvider(), SleeperProjectionProvider(), HistoricalAverageProjectionProvider()]
     )
     projections = await provider.get_projections(session, league)
+    projections = await apply_uncertainty_ranges(session, league, projections)
 
     rows = [
         {
@@ -317,6 +347,8 @@ async def get_projections(
             "floor": p.floor,
             "ceiling": p.ceiling,
             "confidence": p.confidence,
+            "range_source": p.range_source,
+            "sample_size": p.sample_size,
         }
         for p in projections
     ]
@@ -335,6 +367,7 @@ async def get_rankings(
     projections = await provider.get_projections(session, league)
     if not projections:
         return []
+    projections = await apply_uncertainty_ranges(session, league, projections)
 
     result = await session.execute(select(Team).where(Team.league_id == league.id))
     num_teams = len(result.scalars().all())
@@ -353,9 +386,6 @@ async def get_rankings(
         player_vor = vor.get(p.platform_player_id, 0.0)
         value_score = 50.0 if vor_range == 0 else (player_vor - vor_min) / vor_range * 100
         metrics = metrics_by_player.get(p.platform_player_id)
-        # DEF/K structurally have no target share, snap share, etc. -- missing metrics for them means
-        # "not tracked", not "rookie", so they shouldn't get the rookie/limited-history label.
-        no_usage_data_default = "not_applicable" if p.position in NO_USAGE_TRACKING_POSITIONS else "rookie_or_limited_history"
         rows.append(
             {
                 "platform_player_id": p.platform_player_id,
@@ -368,20 +398,9 @@ async def get_rankings(
                 "floor": p.floor,
                 "ceiling": p.ceiling,
                 "confidence": p.confidence,
-                "target_share": metrics.target_share if metrics else None,
-                "targets": metrics.targets if metrics else None,
-                "carries": metrics.carries if metrics else None,
-                "usage_trend": metrics.usage_trend if metrics else None,
-                "snap_share": metrics.snap_share if metrics else None,
-                "red_zone_opportunities": metrics.red_zone_opportunities if metrics else None,
-                "injury_status": metrics.injury_status if metrics else None,
-                "opponent": metrics.opponent if metrics else None,
-                "matchup_rating": metrics.matchup_rating if metrics else None,
-                "experience_status": metrics.experience_status if metrics else no_usage_data_default,
-                "games_played": metrics.games_played if metrics else 0,
-                "season_target_share": metrics.season_target_share if metrics else None,
-                "recent_target_share": metrics.recent_target_share if metrics else None,
-                "availability": metrics.availability if metrics else None,
+                "range_source": p.range_source,
+                "sample_size": p.sample_size,
+                **metrics_to_dict(p.position, metrics),
             }
         )
 
@@ -389,3 +408,12 @@ async def get_rankings(
         rows = [row for row in rows if row["position"] == position.upper()]
 
     return sorted(rows, key=lambda row: row["value_score"], reverse=True)
+
+
+@app.get("/leagues/me/start-sit")
+async def get_start_sit(
+    league: League = Depends(get_fresh_league),
+    team: Team = Depends(get_my_team),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await compute_start_sit(session, league, team)

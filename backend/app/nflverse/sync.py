@@ -7,12 +7,17 @@ from app.models import (
     Player,
     PlayerSeasonBaseline,
     PlayerUsageStats,
+    PositionVolatilityPrior,
     RosterSlot,
     Team,
     TeamDefenseStrength,
     TeamMatchup,
 )
-from app.nflverse.aggregations import compute_position_defense_strength, compute_red_zone_opportunities
+from app.nflverse.aggregations import (
+    compute_position_defense_strength,
+    compute_position_volatility_priors,
+    compute_red_zone_opportunities,
+)
 from app.nflverse.client import NflverseClient
 from app.nflverse.crosswalk import (
     MANUAL_SLEEPER_OVERRIDES,
@@ -163,6 +168,81 @@ async def sync_player_season_baseline(
     await session.commit()
 
 
+async def _upsert_usage_stats_row(
+    session: AsyncSession,
+    league: League,
+    platform_player_id: str,
+    season: str,
+    week: int,
+    *,
+    targets: int | None = None,
+    target_share: float | None = None,
+    carries: int | None = None,
+    snap_share: float | None = None,
+    red_zone_opportunities: int | None = None,
+    fantasy_points_ppr: float | None = None,
+) -> None:
+    result = await session.execute(
+        select(PlayerUsageStats).where(
+            PlayerUsageStats.platform == league.platform,
+            PlayerUsageStats.platform_player_id == platform_player_id,
+            PlayerUsageStats.season == season,
+            PlayerUsageStats.week == week,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        session.add(
+            PlayerUsageStats(
+                platform=league.platform,
+                platform_player_id=platform_player_id,
+                season=season,
+                week=week,
+                targets=targets,
+                target_share=target_share,
+                carries=carries,
+                snap_share=snap_share,
+                red_zone_opportunities=red_zone_opportunities,
+                fantasy_points_ppr=fantasy_points_ppr,
+            )
+        )
+    else:
+        record.targets = targets
+        record.target_share = target_share
+        record.carries = carries
+        record.snap_share = snap_share
+        record.red_zone_opportunities = red_zone_opportunities
+        record.fantasy_points_ppr = fantasy_points_ppr
+
+
+async def sync_position_volatility_priors(session: AsyncSession, season: str, weekly_stats: pd.DataFrame) -> None:
+    priors = compute_position_volatility_priors(weekly_stats)
+    for position, (low_ratio, high_ratio, sample_size) in priors.items():
+        result = await session.execute(
+            select(PositionVolatilityPrior).where(
+                PositionVolatilityPrior.season == season,
+                PositionVolatilityPrior.position == position,
+            )
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            session.add(
+                PositionVolatilityPrior(
+                    season=season,
+                    position=position,
+                    low_ratio=low_ratio,
+                    high_ratio=high_ratio,
+                    sample_size=sample_size,
+                )
+            )
+        else:
+            record.low_ratio = low_ratio
+            record.high_ratio = high_ratio
+            record.sample_size = sample_size
+
+    await session.commit()
+
+
 async def sync_matchup_context(
     session: AsyncSession, client: NflverseClient, league: League, weekly_stats: pd.DataFrame
 ) -> None:
@@ -213,10 +293,8 @@ async def sync_usage_stats(session: AsyncSession, client: NflverseClient, league
     if not rostered_player_ids:
         return
 
+    # Prior-season baseline sync below must not depend on the CURRENT season's file existing yet.
     weekly_stats = await client.get_weekly_stats(league.season)
-    if weekly_stats.empty:
-        return
-
     await sync_matchup_context(session, client, league, weekly_stats)
 
     crosswalk = await client.get_player_crosswalk()
@@ -238,6 +316,34 @@ async def sync_usage_stats(session: AsyncSession, client: NflverseClient, league
 
     await sync_player_season_baseline(session, client, league, gsis_to_players)
 
+    prior_season = str(int(league.season) - 1)
+    prior_weekly_stats = await client.get_weekly_stats(prior_season)
+    if not prior_weekly_stats.empty:
+        await sync_position_volatility_priors(session, prior_season, prior_weekly_stats)
+
+        prior_relevant = prior_weekly_stats[
+            (prior_weekly_stats["player_id"].isin(gsis_to_players.keys()))
+            & (prior_weekly_stats["season_type"] == "REG")
+        ]
+        for _, row in prior_relevant.iterrows():
+            gsis_id = row["player_id"]
+            for platform_player_id in gsis_to_players[gsis_id]:
+                await _upsert_usage_stats_row(
+                    session,
+                    league,
+                    platform_player_id,
+                    prior_season,
+                    int(row["week"]),
+                    targets=_clean_int(row.get("targets")),
+                    target_share=_clean_float(row.get("target_share")),
+                    carries=_clean_int(row.get("carries")),
+                    fantasy_points_ppr=_clean_float(row.get("fantasy_points_ppr")),
+                )
+        await session.commit()
+
+    if weekly_stats.empty:
+        return
+
     snap_counts = await client.get_snap_counts(league.season)
     pbp = await client.get_play_by_play(league.season)
     snap_lookup = _snap_share_lookup(snap_counts, crosswalk)
@@ -255,36 +361,21 @@ async def sync_usage_stats(session: AsyncSession, client: NflverseClient, league
         carries = _clean_int(row.get("carries"))
         snap_share = snap_lookup.get((gsis_id, week))
         red_zone_opportunities = red_zone_lookup.get((gsis_id, week))
+        fantasy_points_ppr = _clean_float(row.get("fantasy_points_ppr"))
 
         for platform_player_id in gsis_to_players[gsis_id]:
-            result = await session.execute(
-                select(PlayerUsageStats).where(
-                    PlayerUsageStats.platform == league.platform,
-                    PlayerUsageStats.platform_player_id == platform_player_id,
-                    PlayerUsageStats.season == league.season,
-                    PlayerUsageStats.week == week,
-                )
+            await _upsert_usage_stats_row(
+                session,
+                league,
+                platform_player_id,
+                league.season,
+                week,
+                targets=targets,
+                target_share=target_share,
+                carries=carries,
+                snap_share=snap_share,
+                red_zone_opportunities=red_zone_opportunities,
+                fantasy_points_ppr=fantasy_points_ppr,
             )
-            record = result.scalar_one_or_none()
-            if record is None:
-                session.add(
-                    PlayerUsageStats(
-                        platform=league.platform,
-                        platform_player_id=platform_player_id,
-                        season=league.season,
-                        week=week,
-                        targets=targets,
-                        target_share=target_share,
-                        carries=carries,
-                        snap_share=snap_share,
-                        red_zone_opportunities=red_zone_opportunities,
-                    )
-                )
-            else:
-                record.targets = targets
-                record.target_share = target_share
-                record.carries = carries
-                record.snap_share = snap_share
-                record.red_zone_opportunities = red_zone_opportunities
 
     await session.commit()

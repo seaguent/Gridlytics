@@ -28,11 +28,19 @@ interface ApiGetMessage {
   token: string;
 }
 
+interface ApiPostMessage {
+  type: "API_POST";
+  path: string;
+  token: string;
+  body: unknown;
+}
+
 type Message =
   | ConnectLeagueMessage
   | ConnectEspnLeagueMessage
   | ResyncEspnLeagueMessage
-  | ApiGetMessage;
+  | ApiGetMessage
+  | ApiPostMessage;
 
 async function connectLeague(platformLeagueId: string): Promise<{ ok: boolean; error?: string }> {
   const token = generateToken();
@@ -137,6 +145,23 @@ async function apiGet(
   return { ok: true, data: await response.json() };
 }
 
+async function apiPost(
+  path: string,
+  token: string,
+  body: unknown
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    return { ok: false, error: `Request to ${path} failed with status ${response.status}` };
+  }
+  return { ok: true, data: await response.json() };
+}
+
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   if (message.type === "CONNECT_LEAGUE") {
     connectLeague(message.platformLeagueId).then(sendResponse);
@@ -155,6 +180,11 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
   if (message.type === "API_GET") {
     apiGet(message.path, message.token).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "API_POST") {
+    apiPost(message.path, message.token, message.body).then(sendResponse);
     return true;
   }
 

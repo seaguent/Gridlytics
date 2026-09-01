@@ -3,7 +3,14 @@ from datetime import datetime, UTC
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.espn.parser import parse_league, parse_matchups, parse_projections, parse_rosters, parse_teams
+from app.espn.parser import (
+    parse_actual_scores,
+    parse_league,
+    parse_matchups,
+    parse_projections,
+    parse_rosters,
+    parse_teams,
+)
 from app.espn.schemas import EspnLeagueResponse
 from app.models import League, Matchup, Player, ProjectionRecord, RosterSlot, Team, WeeklyScore
 
@@ -94,6 +101,10 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
         else:
             weekly_score.points = matchup_fields["points"]
 
+    actual_points_by_player_week: dict[tuple[str, int], float] = {
+        (score["platform_player_id"], score["week"]): score["points"] for score in parse_actual_scores(raw)
+    }
+
     for roster_fields in parse_rosters(raw):
         team = teams_by_platform_id.get(roster_fields["platform_team_id"])
         if team is None:
@@ -123,6 +134,9 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             player.team = roster_fields["team"]
             player.injury_status = roster_fields["injury_status"]
 
+        current_week_points = actual_points_by_player_week.get(
+            (roster_fields["platform_player_id"], league.current_week), 0
+        )
         result = await session.execute(
             select(RosterSlot).where(
                 RosterSlot.team_id == team.id,
@@ -138,11 +152,39 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
                     week=league.current_week,
                     platform_player_id=roster_fields["platform_player_id"],
                     is_starter=roster_fields["is_starter"],
-                    points=0,
+                    points=current_week_points,
                 )
             )
         else:
             slot.is_starter = roster_fields["is_starter"]
+            slot.points = current_week_points
+
+        # A player's actual score history isn't week-scoped to "currently on this roster" the way
+        # membership is -- backfill every other real week we have data for under their current team,
+        # since this app doesn't track historical roster composition separately.
+        for (platform_player_id, week), points in actual_points_by_player_week.items():
+            if platform_player_id != roster_fields["platform_player_id"] or week == league.current_week:
+                continue
+            result = await session.execute(
+                select(RosterSlot).where(
+                    RosterSlot.team_id == team.id,
+                    RosterSlot.week == week,
+                    RosterSlot.platform_player_id == platform_player_id,
+                )
+            )
+            historical_slot = result.scalar_one_or_none()
+            if historical_slot is None:
+                session.add(
+                    RosterSlot(
+                        team_id=team.id,
+                        week=week,
+                        platform_player_id=platform_player_id,
+                        is_starter=roster_fields["is_starter"],
+                        points=points,
+                    )
+                )
+            else:
+                historical_slot.points = points
 
     for projection_fields in parse_projections(raw):
         result = await session.execute(

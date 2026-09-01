@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session
-from app.models import League, LeagueConnection
+from app.models import League, LeagueConnection, Team
 from app.sleeper.client import SleeperClient
 from app.sleeper.sync import refresh_league
 from app.tokens import hash_token
@@ -19,10 +19,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def get_current_league(
+async def get_current_connection(
     authorization: str | None = Header(None),
     session: AsyncSession = Depends(get_session),
-) -> League:
+) -> LeagueConnection:
     if authorization is None or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
     token = authorization.removeprefix("Bearer ")
@@ -34,9 +34,28 @@ async def get_current_league(
     connection = result.scalar_one_or_none()
     if connection is None:
         raise HTTPException(status_code=401, detail="Invalid access token")
+    return connection
 
+
+async def get_current_league(
+    connection: LeagueConnection = Depends(get_current_connection),
+    session: AsyncSession = Depends(get_session),
+) -> League:
     result = await session.execute(select(League).where(League.id == connection.league_id))
     return result.scalar_one()
+
+
+async def get_my_team(
+    connection: LeagueConnection = Depends(get_current_connection),
+    session: AsyncSession = Depends(get_session),
+) -> Team:
+    if connection.my_team_id is None:
+        raise HTTPException(status_code=400, detail="No team selected for this league yet")
+    result = await session.execute(select(Team).where(Team.id == connection.my_team_id))
+    team = result.scalar_one_or_none()
+    if team is None:
+        raise HTTPException(status_code=400, detail="Selected team no longer exists")
+    return team
 
 
 async def get_fresh_league(

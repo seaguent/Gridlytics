@@ -1,4 +1,5 @@
 import { RankingRow } from "../api";
+import { rangeProvenanceText, rangeSourceShortLabel } from "../rangeSource";
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"] as const;
 
@@ -50,9 +51,14 @@ export function Rankings({
             <div className="gl-row-stats">
               <span className="gl-stat">{row.projected_points.toFixed(1)} proj</span>
               <span className="gl-stat-sep">·</span>
-              <span className="gl-stat">
+              <span
+                className="gl-stat"
+                title={rangeProvenanceText(row.range_source, row.sample_size, row.position)}
+              >
                 {row.floor !== null && row.ceiling !== null
-                  ? `${row.floor.toFixed(1)}-${row.ceiling.toFixed(1)} range`
+                  ? `${row.floor.toFixed(1)}-${row.ceiling.toFixed(1)} range${
+                      rangeSourceShortLabel(row.range_source) ? ` (${rangeSourceShortLabel(row.range_source)})` : ""
+                    }`
                   : "range n/a"}
               </span>
               {row.target_share !== null && (

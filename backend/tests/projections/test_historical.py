@@ -6,7 +6,10 @@ from app.projections.historical import HistoricalAverageProjectionProvider
 
 @pytest.mark.asyncio
 async def test_historical_average_projection_uses_recency_weighting(db_session):
-    league = League(platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season")
+    league = League(
+        platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season",
+        current_week=4,
+    )
     db_session.add(league)
     await db_session.flush()
 
@@ -41,13 +44,16 @@ async def test_historical_average_projection_uses_recency_weighting(db_session):
     assert by_id["100"].projected_points == pytest.approx(25.714, abs=0.005)
     assert by_id["100"].name == "Player A"
     assert by_id["100"].position == "RB"
-    assert by_id["100"].sources == ["historical_weighted_average"]
+    assert by_id["100"].sources == ["sleeper_historical_weighted_average"]
     assert by_id["200"].projected_points == pytest.approx(12.143, abs=0.005)
 
 
 @pytest.mark.asyncio
 async def test_historical_average_projection_skips_players_with_insufficient_history(db_session):
-    league = League(platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season")
+    league = League(
+        platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season",
+        current_week=4,
+    )
     db_session.add(league)
     await db_session.flush()
 
@@ -94,8 +100,13 @@ async def test_historical_average_projection_returns_empty_with_no_history(db_se
 
 
 @pytest.mark.asyncio
-async def test_historical_average_projection_skips_non_sleeper_leagues(db_session):
-    league = League(platform="espn", platform_league_id="1", season="2026", name="L", status="in_season")
+async def test_historical_average_projection_now_works_for_espn_with_real_actual_points(db_session):
+    # ESPN actual-score parsing (app/espn/parser.py parse_actual_scores) now feeds real points into
+    # RosterSlot -- the old platform-wide ESPN exclusion is gone; this proves ESPN gets a real average too.
+    league = League(
+        platform="espn", platform_league_id="1", season="2026", name="L", status="in_season",
+        current_week=3,
+    )
     db_session.add(league)
     await db_session.flush()
 
@@ -104,17 +115,50 @@ async def test_historical_average_projection_skips_non_sleeper_leagues(db_sessio
     await db_session.flush()
 
     db_session.add(Player(platform="espn", platform_player_id="100", position="WR", name="Puka Nacua"))
-
-    # ESPN's adapter hardcodes RosterSlot.points to 0 -- using it would fake a ~0 projection.
     db_session.add_all(
         [
-            RosterSlot(team_id=team.id, platform_player_id="100", week=1, points=0, is_starter=True),
-            RosterSlot(team_id=team.id, platform_player_id="100", week=2, points=0, is_starter=True),
+            RosterSlot(team_id=team.id, platform_player_id="100", week=1, points=18.0, is_starter=True),
+            RosterSlot(team_id=team.id, platform_player_id="100", week=2, points=22.0, is_starter=True),
         ]
     )
-    await db_session.flush()
+    await db_session.commit()
 
-    provider = HistoricalAverageProjectionProvider()
+    provider = HistoricalAverageProjectionProvider(num_weeks=5, decay=1.0)
     projections = await provider.get_projections(db_session, league)
 
-    assert projections == []
+    assert len(projections) == 1
+    assert projections[0].platform_player_id == "100"
+    assert projections[0].projected_points == pytest.approx(20.0)
+    assert projections[0].sources == ["espn_historical_weighted_average"]
+
+
+@pytest.mark.asyncio
+async def test_historical_average_projection_excludes_the_in_progress_current_week(db_session):
+    # The current week's RosterSlot.points can legitimately be 0 (game hasn't happened yet) for either
+    # platform now that ESPN also writes real per-week rows -- that must never be averaged in as a score.
+    league = League(
+        platform="espn", platform_league_id="1", season="2026", name="L", status="in_season",
+        current_week=3,
+    )
+    db_session.add(league)
+    await db_session.flush()
+
+    team = Team(league_id=league.id, platform_roster_id="1", display_name="A")
+    db_session.add(team)
+    await db_session.flush()
+
+    db_session.add(Player(platform="espn", platform_player_id="100", position="WR", name="P"))
+    db_session.add_all(
+        [
+            RosterSlot(team_id=team.id, platform_player_id="100", week=1, points=20.0, is_starter=True),
+            RosterSlot(team_id=team.id, platform_player_id="100", week=2, points=20.0, is_starter=True),
+            # week 3 == league.current_week -- hasn't been played yet, points=0 is a placeholder, not a score.
+            RosterSlot(team_id=team.id, platform_player_id="100", week=3, points=0, is_starter=True),
+        ]
+    )
+    await db_session.commit()
+
+    provider = HistoricalAverageProjectionProvider(num_weeks=5, decay=1.0)
+    projections = await provider.get_projections(db_session, league)
+
+    assert projections[0].projected_points == pytest.approx(20.0)

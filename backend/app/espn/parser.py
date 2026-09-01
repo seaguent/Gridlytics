@@ -152,3 +152,28 @@ def parse_projections(raw: EspnLeagueResponse) -> list[dict]:
                 }
             )
     return projections
+
+
+ACTUAL_STAT_SOURCE_ID = 0
+
+
+def parse_actual_scores(raw: EspnLeagueResponse) -> list[dict]:
+    scores = []
+    for team in raw.teams:
+        for entry in team.roster.entries:
+            player = entry.playerPoolEntry.player
+            for stat in player.stats:
+                if stat.statSourceId != ACTUAL_STAT_SOURCE_ID:
+                    continue
+                if stat.scoringPeriodId is None or stat.appliedTotal is None:
+                    continue
+                scores.append(
+                    {
+                        "platform_team_id": str(team.id),
+                        "platform_player_id": str(entry.playerId),
+                        "week": stat.scoringPeriodId,
+                        "points": stat.appliedTotal,
+                        "is_starter": entry.lineupSlotId in STARTER_SLOT_IDS,
+                    }
+                )
+    return scores

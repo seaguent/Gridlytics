@@ -4,17 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import League, Player, RosterSlot, Team
 from app.projections.models import PlayerProjection
-from app.projections.uncertainty import compute_floor_ceiling_confidence
 from app.projections.weighting import compute_weighted_recent_form
 
 MIN_HISTORY_WEEKS = 2
 
 
-async def load_player_history(session: AsyncSession, league_id: int) -> pd.DataFrame:
+async def load_player_history(session: AsyncSession, league: League) -> pd.DataFrame:
     result = await session.execute(
         select(RosterSlot.platform_player_id, RosterSlot.week, RosterSlot.points)
         .join(Team, RosterSlot.team_id == Team.id)
-        .where(Team.league_id == league_id)
+        .where(Team.league_id == league.id, RosterSlot.week < league.current_week)
     )
     records = [
         {"platform_player_id": platform_player_id, "week": week, "points": points}
@@ -29,11 +28,7 @@ class HistoricalAverageProjectionProvider:
         self.decay = decay
 
     async def get_projections(self, session: AsyncSession, league: League) -> list[PlayerProjection]:
-        if league.platform != "sleeper":
-            # RosterSlot.points is hardcoded to 0 for non-Sleeper platforms -- averaging it would be wrong.
-            return []
-
-        history = await load_player_history(session, league.id)
+        history = await load_player_history(session, league)
         if not len(history):
             return []
 
@@ -60,18 +55,13 @@ class HistoricalAverageProjectionProvider:
             if len(player_scores) < MIN_HISTORY_WEEKS:
                 continue
 
-            floor, ceiling, confidence = compute_floor_ceiling_confidence(player_scores)
-
             projections.append(
                 PlayerProjection(
                     platform_player_id=platform_player_id,
                     name=player.name if player else platform_player_id,
                     position=player.position if player else "UNKNOWN",
                     projected_points=avg_points,
-                    sources=["historical_weighted_average"],
-                    floor=floor,
-                    ceiling=ceiling,
-                    confidence=confidence,
+                    sources=[f"{league.platform}_historical_weighted_average"],
                 )
             )
         return projections

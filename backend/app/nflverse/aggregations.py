@@ -1,6 +1,10 @@
 import pandas as pd
 
 RED_ZONE_YARDLINE = 20
+MIN_GAMES_FOR_PLAYER_RATIO = 4
+MIN_POOLED_RATIOS = 10
+LOW_PERCENTILE = 0.2
+HIGH_PERCENTILE = 0.8
 
 
 def compute_red_zone_opportunities(pbp: pd.DataFrame) -> pd.DataFrame:
@@ -39,3 +43,35 @@ def compute_position_defense_strength(weekly_stats: pd.DataFrame) -> pd.DataFram
         .reset_index(name="points_allowed_avg")
     )
     return grouped
+
+
+def compute_position_volatility_priors(weekly_stats: pd.DataFrame) -> dict[str, tuple[float, float, int]]:
+    if weekly_stats.empty:
+        return {}
+
+    regular_season = weekly_stats[weekly_stats["season_type"] == "REG"]
+
+    priors: dict[str, tuple[float, float, int]] = {}
+    for position, group in regular_season.groupby("position"):
+        ratios: list[float] = []
+        for _, player_games in group.groupby("player_id"):
+            scores = player_games["fantasy_points_ppr"].dropna()
+            if len(scores) < MIN_GAMES_FOR_PLAYER_RATIO:
+                continue
+            mean = scores.mean()
+            if mean == 0 or pd.isna(mean):
+                continue
+            # Normalize to each player's own average so the pool reflects relative spread, not magnitude.
+            ratios.extend((scores / mean).tolist())
+
+        if len(ratios) < MIN_POOLED_RATIOS:
+            continue
+
+        series = pd.Series(ratios)
+        priors[position] = (
+            float(series.quantile(LOW_PERCENTILE)),
+            float(series.quantile(HIGH_PERCENTILE)),
+            len(ratios),
+        )
+
+    return priors

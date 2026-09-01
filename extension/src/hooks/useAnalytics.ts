@@ -10,7 +10,7 @@ import {
   StandingRow,
 } from "../api";
 
-export function useAnalytics(token: string | null) {
+export function useAnalytics(token: string | null, refreshKey: number = 0) {
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [powerRankings, setPowerRankings] = useState<PowerRankingRow[] | null>(null);
   const [playoffOdds, setPlayoffOdds] = useState<PlayoffOddsRow[] | null>(null);
@@ -32,7 +32,7 @@ export function useAnalytics(token: string | null) {
         setEfficiency(e);
       })
       .catch((err: Error) => setError(err.message));
-  }, [token]);
+  }, [token, refreshKey]);
 
   return { standings, powerRankings, playoffOdds, efficiency, error };
 }

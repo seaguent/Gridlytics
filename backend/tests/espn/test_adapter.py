@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.espn.adapter import sync_league
 from app.espn.schemas import EspnLeagueResponse
 from app.models import League, Matchup, Player, RosterSlot, Team, WeeklyScore
+from tests.espn.test_actual_scores import _sample_with_actual_history
 from tests.espn.test_parser import SAMPLE_RAW
 
 
@@ -45,6 +46,41 @@ async def test_sync_league_persists_league_teams_matchups_and_rosters(db_session
     roster_slots = {slot.platform_player_id: slot for slot in result.scalars()}
     assert roster_slots["111"].is_starter is True
     assert roster_slots["112"].is_starter is False
+
+
+@pytest.mark.asyncio
+async def test_sync_league_persists_real_actual_points_for_current_and_past_weeks(db_session):
+    raw = _sample_with_actual_history()
+
+    league = await sync_league(db_session, raw)
+
+    result = await db_session.execute(select(Team).where(Team.league_id == league.id))
+    team_one = next(t for t in result.scalars() if t.platform_roster_id == "1")
+
+    result = await db_session.execute(select(RosterSlot).where(RosterSlot.team_id == team_one.id))
+    slots_by_player_week = {(s.platform_player_id, s.week): s.points for s in result.scalars()}
+
+    assert slots_by_player_week[("111", 1)] == 24.6
+    assert slots_by_player_week[("111", 2)] == 12.1
+    # current week (3) has no real actual stat in the fixture (game not played yet) -- must not be fabricated
+    assert slots_by_player_week[("111", 3)] == 0
+    assert slots_by_player_week[("112", 1)] == 5.3
+
+
+@pytest.mark.asyncio
+async def test_sync_league_actual_points_are_idempotent(db_session):
+    raw = _sample_with_actual_history()
+
+    await sync_league(db_session, raw)
+    league = await sync_league(db_session, raw)
+
+    result = await db_session.execute(select(Team).where(Team.league_id == league.id))
+    team_one = next(t for t in result.scalars() if t.platform_roster_id == "1")
+
+    result = await db_session.execute(select(RosterSlot).where(RosterSlot.team_id == team_one.id))
+    slots = result.scalars().all()
+    # 2 players x 2 real weeks (111: weeks 1,2,3; 112: weeks 1,3) -- no duplicate rows from re-sync
+    assert len({(s.platform_player_id, s.week) for s in slots}) == len(slots)
 
 
 @pytest.mark.asyncio

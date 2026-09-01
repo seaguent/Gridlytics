@@ -11,6 +11,8 @@ class PlayerProjection:
     floor: float | None = None
     ceiling: float | None = None
     confidence: float | None = None
+    range_source: str | None = None
+    sample_size: int = 0
 
 
 @dataclass

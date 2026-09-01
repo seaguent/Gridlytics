@@ -128,6 +128,7 @@ class PlayerUsageStats(Base):
     carries: Mapped[int | None] = mapped_column(nullable=True)
     snap_share: Mapped[float | None] = mapped_column(nullable=True)
     red_zone_opportunities: Mapped[int | None] = mapped_column(nullable=True)
+    fantasy_points_ppr: Mapped[float | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
@@ -153,6 +154,18 @@ class TeamMatchup(Base):
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
+class PositionVolatilityPrior(Base):
+    __tablename__ = "position_volatility_priors"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[str] = mapped_column(String(8))
+    position: Mapped[str] = mapped_column(String(16))
+    low_ratio: Mapped[float]
+    high_ratio: Mapped[float]
+    sample_size: Mapped[int]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
 class PlayerSeasonBaseline(Base):
     __tablename__ = "player_season_baselines"
 
@@ -171,6 +184,7 @@ class LeagueConnection(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     league_id: Mapped[int] = mapped_column(ForeignKey("leagues.id"))
     access_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    my_team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     league: Mapped["League"] = relationship(back_populates="connections")

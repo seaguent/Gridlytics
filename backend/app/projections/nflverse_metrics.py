@@ -11,10 +11,10 @@ from app.models import (
 )
 from app.nflverse.crosswalk import normalize_team
 from app.projections.availability import classify_availability
+from app.projections.blending import prior_season_weight
 from app.projections.models import PlayerMetrics
 
 TREND_THRESHOLD = 0.03
-FULL_TRANSITION_WEEKS = 8
 RECENT_FORM_GAMES = 3
 
 
@@ -46,12 +46,6 @@ def _matchup_rating(points_allowed_avg: float, position_values: list[float]) -> 
 
 def _average(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
-
-
-def prior_season_weight(games_played_this_season: int) -> float:
-    # Sample-size based, not calendar-week based -- byes/injuries mean games
-    # played and weeks elapsed aren't the same thing.
-    return max(0.0, min(1.0, 1 - games_played_this_season / FULL_TRANSITION_WEEKS))
 
 
 def _blend_target_share(

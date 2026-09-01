@@ -1,7 +1,7 @@
 import pytest
 
 from app.models import League, Player, PlayerSeasonBaseline, PlayerUsageStats, TeamDefenseStrength, TeamMatchup
-from app.projections.nflverse_metrics import NflverseMetricsProvider, prior_season_weight
+from app.projections.nflverse_metrics import NflverseMetricsProvider
 
 
 async def _make_league(db_session, platform: str = "espn", season: str = "2024") -> League:
@@ -163,13 +163,6 @@ async def test_provider_normalizes_sleeper_team_alias_for_matchup_lookup(db_sess
     metrics = await provider.get_metrics(db_session, league)
 
     assert metrics[0].opponent == "SF"
-
-
-def test_prior_season_weight_decays_by_games_played_not_calendar_weeks():
-    assert prior_season_weight(0) == 1.0
-    assert prior_season_weight(4) == pytest.approx(0.5)
-    assert prior_season_weight(8) == 0.0
-    assert prior_season_weight(12) == 0.0
 
 
 @pytest.mark.asyncio

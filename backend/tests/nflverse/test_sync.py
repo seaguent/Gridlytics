@@ -6,7 +6,16 @@ import pytest
 import respx
 from sqlalchemy import select
 
-from app.models import League, Player, PlayerUsageStats, RosterSlot, Team, TeamDefenseStrength, TeamMatchup
+from app.models import (
+    League,
+    Player,
+    PlayerUsageStats,
+    PositionVolatilityPrior,
+    RosterSlot,
+    Team,
+    TeamDefenseStrength,
+    TeamMatchup,
+)
 from app.nflverse.client import DYNASTYPROCESS_IDS_URL, NFLVERSE_RELEASES_BASE_URL, NflverseClient
 from app.nflverse.crosswalk import MANUAL_SLEEPER_OVERRIDES
 from app.nflverse.sync import sync_matchup_context, sync_usage_stats
@@ -70,6 +79,9 @@ def _mock_nflverse(season: str = "2024") -> None:
     )
     prior_season = str(int(season) - 1)
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{prior_season}.csv").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{prior_season}.csv").mock(
         return_value=httpx.Response(404)
     )
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/pbp/play_by_play_{season}.csv.gz").mock(
@@ -289,10 +301,30 @@ async def test_sync_usage_stats_is_idempotent(db_session):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_sync_usage_stats_noop_when_season_not_published(db_session):
+async def test_sync_usage_stats_still_syncs_prior_season_baseline_when_current_season_not_published(db_session):
+    from app.models import PlayerSeasonBaseline
+
     league = await _make_league(db_session, "espn", season="2099")
     await _add_rostered_player(db_session, league, "4426515")
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2099.csv").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/players/players.csv").mock(
+        return_value=httpx.Response(200, text=CROSSWALK_CSV)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
+        return_value=httpx.Response(200, text="season,week,home_team,away_team\n2099,1,LA,SF\n")
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_2098.csv").mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                "player_id,player_display_name,position,recent_team,target_share\n"
+                "00-0039075,Puka Nacua,WR,LA,0.27\n"
+            ),
+        )
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2098.csv").mock(
         return_value=httpx.Response(404)
     )
 
@@ -300,8 +332,86 @@ async def test_sync_usage_stats_noop_when_season_not_published(db_session):
     await sync_usage_stats(db_session, client, league)
     await client.aclose()
 
+    # No current-season usage data exists yet -- must not be fabricated.
     result = await db_session.execute(select(PlayerUsageStats))
     assert result.scalars().all() == []
+
+    # But the prior-season baseline should still sync -- this is exactly the preseason case where
+    # it matters most, and used to get silently skipped because it was gated behind the (unrelated)
+    # current-season file existing.
+    result = await db_session.execute(select(PlayerSeasonBaseline))
+    baselines = result.scalars().all()
+    assert len(baselines) == 1
+    assert baselines[0].platform_player_id == "4426515"
+    assert baselines[0].season == "2098"
+    assert baselines[0].target_share == 0.27
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_persists_prior_season_weekly_scores(db_session):
+    league = await _make_league(db_session, "espn")
+    await _add_rostered_player(db_session, league, "4426515")
+    _mock_nflverse()
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2023.csv").mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                "player_id,player_display_name,position,season_type,week,targets,target_share,carries,"
+                "fantasy_points_ppr\n"
+                "00-0039075,Puka Nacua,WR,REG,1,9,0.25,0,17.5\n"
+                "00-0039075,Puka Nacua,WR,POST,19,5,0.2,0,9.0\n"
+            ),
+        )
+    )
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(PlayerUsageStats).where(
+            PlayerUsageStats.platform_player_id == "4426515", PlayerUsageStats.season == "2023"
+        )
+    )
+    records = result.scalars().all()
+    assert len(records) == 1
+    assert records[0].fantasy_points_ppr == 17.5
+    assert records[0].target_share == 0.25
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_persists_position_volatility_priors_from_prior_season(db_session):
+    league = await _make_league(db_session, "espn")
+    await _add_rostered_player(db_session, league, "4426515")
+    _mock_nflverse()
+
+    rows = ["player_id,player_display_name,position,season_type,week,fantasy_points_ppr"]
+    for player_id, scores in [
+        ("rb-1", [8.0, 12.0, 4.0, 16.0]),
+        ("rb-2", [16.0, 24.0, 8.0, 32.0]),
+        ("rb-3", [6.0, 9.0, 3.0, 12.0]),
+    ]:
+        for week, score in enumerate(scores, start=1):
+            rows.append(f"{player_id},Someone,RB,REG,{week},{score}")
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2023.csv").mock(
+        return_value=httpx.Response(200, text="\n".join(rows) + "\n")
+    )
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(PositionVolatilityPrior).where(
+            PositionVolatilityPrior.season == "2023", PositionVolatilityPrior.position == "RB"
+        )
+    )
+    prior = result.scalar_one_or_none()
+    assert prior is not None
+    assert prior.sample_size == 12
+    assert prior.low_ratio < 1.0 < prior.high_ratio
 
 
 @pytest.mark.asyncio
