@@ -1,7 +1,10 @@
 import pytest
 
+from app.models import League, Player, ProjectionRecord, RosterSlot, Team
 from app.projections.ensemble import EnsembleProjectionProvider
+from app.projections.historical import HistoricalAverageProjectionProvider
 from app.projections.models import PlayerProjection
+from app.projections.sleeper import SleeperProjectionProvider
 
 
 class _FakeProvider:
@@ -71,3 +74,36 @@ async def test_ensemble_averages_floor_ceiling_confidence_from_providers_that_ha
     assert projections[0].floor == 12.0
     assert projections[0].ceiling == 24.0
     assert projections[0].confidence == 0.8
+
+
+@pytest.mark.asyncio
+async def test_ensemble_gives_a_rookie_the_clean_platform_projection_not_a_diluted_zero(db_session):
+    league = League(platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season")
+    db_session.add(league)
+    await db_session.flush()
+
+    team = Team(league_id=league.id, platform_roster_id="1", display_name="A")
+    db_session.add(team)
+    await db_session.flush()
+
+    db_session.add(Player(platform="sleeper", platform_player_id="999", position="WR", name="Rookie"))
+    # Only one real game -- below historical.py's MIN_HISTORY_WEEKS gate.
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="999", is_starter=True, points=9.0))
+    db_session.add(
+        ProjectionRecord(
+            league_id=league.id, platform_player_id="999", week=1, source="sleeper",
+            name="Rookie", position="WR", projected_points=14.5,
+        )
+    )
+    league.current_week = 1
+    await db_session.commit()
+
+    ensemble = EnsembleProjectionProvider(
+        [SleeperProjectionProvider(), HistoricalAverageProjectionProvider()]
+    )
+    projections = await ensemble.get_projections(db_session, league)
+
+    assert len(projections) == 1
+    assert projections[0].platform_player_id == "999"
+    assert projections[0].projected_points == 14.5
+    assert projections[0].sources == ["sleeper"]

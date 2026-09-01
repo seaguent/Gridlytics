@@ -2,14 +2,7 @@ import pandas as pd
 
 from app.analytics.recap import generate_weekly_recap
 
-# Scenario: A(130) beat C(100); B(90) beat D(85).
-# Power scores: A=90, B=40, C=70, D=60.
-# -> A beating C is chalk (A was favored by power). B beating D is the
-#    upset (B was a big underdog by power, but won anyway).
-# -> Ranking all 4 scores that week: D=1st(lowest), B=2nd, C=3rd, A=4th
-#    (highest) -> all-play fractions D=0, B=1/3, C=2/3, A=1.0.
-#    Of the two LOSERS (C, D), C had the better week (2/3) but still lost
-#    because they faced the week's top scorer -> C is "unluckiest".
+# A(130) beat C(100), B(90) beat D(85); power scores A=90 B=40 C=70 D=60 -> B/D is the upset, C is unluckiest.
 
 
 def _week_scores() -> pd.DataFrame:

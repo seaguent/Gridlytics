@@ -7,6 +7,8 @@ from app.projections.models import PlayerProjection
 from app.projections.uncertainty import compute_floor_ceiling_confidence
 from app.projections.weighting import compute_weighted_recent_form
 
+MIN_HISTORY_WEEKS = 2
+
 
 async def load_player_history(session: AsyncSession, league_id: int) -> pd.DataFrame:
     result = await session.execute(
@@ -28,10 +30,7 @@ class HistoricalAverageProjectionProvider:
 
     async def get_projections(self, session: AsyncSession, league: League) -> list[PlayerProjection]:
         if league.platform != "sleeper":
-            # RosterSlot.points isn't real per-player data on other platforms
-            # yet -- e.g. the ESPN adapter hardcodes it to 0 as a placeholder
-            # (per-player weekly points aren't wired up for ESPN yet). Averaging
-            # against that would be actively wrong, not just less accurate.
+            # RosterSlot.points is hardcoded to 0 for non-Sleeper platforms -- averaging it would be wrong.
             return []
 
         history = await load_player_history(session, league.id)
@@ -57,6 +56,10 @@ class HistoricalAverageProjectionProvider:
             player_scores = recent_history.loc[
                 recent_history["platform_player_id"] == platform_player_id, "points"
             ]
+            # Fewer than 2 real weeks is a one-game fluke, not a trend -- skip and let ESPN/Sleeper carry it.
+            if len(player_scores) < MIN_HISTORY_WEEKS:
+                continue
+
             floor, ceiling, confidence = compute_floor_ceiling_confidence(player_scores)
 
             projections.append(

@@ -42,8 +42,7 @@ def test_flex_picks_best_remaining_regardless_of_position():
 
     assignment, total = find_optimal_lineup(players, slots)
 
-    # RB slot takes the best RB (rb1=20); FLEX then picks the best remaining
-    # ELIGIBLE player: wr1 (18) beats rb2 (15), even though rb2 is a "pure" RB.
+    # RB takes rb1 (20); FLEX then picks wr1 (18) over rb2 (15), the best remaining eligible player.
     assert ("RB", "rb1") in assignment
     assert ("FLEX", "wr1") in assignment
     assert total == 38
@@ -78,6 +77,71 @@ def test_super_flex_can_use_a_qb_flex_cannot():
     assert ("FLEX", "rb2") in assignment
     assert ("SUPER_FLEX", "qb1") in assignment
     assert total == 30 + 25 + 28
+
+
+def test_bench_and_ir_slots_are_ignored_not_filled():
+    players = [
+        {"player_id": "qb1", "position": "QB", "points": 20},
+        {"player_id": "rb1", "position": "RB", "points": 15},
+        {"player_id": "rb2", "position": "RB", "points": 10},
+    ]
+    # BN/IR are real slot strings both platforms emit, but they're not scoring slots.
+    slots = ["QB", "RB", "BN", "BN", "IR"]
+
+    assignment, total = find_optimal_lineup(players, slots)
+
+    slot_names = [slot for slot, _ in assignment]
+    assert "BN" not in slot_names
+    assert "IR" not in slot_names
+    assert total == 20 + 15
+
+
+def test_real_sleeper_roster_shape_fills_correctly():
+    # Sean's actual Sunday Funday roster_positions from the DB.
+    slots = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN"]
+    players = [
+        {"player_id": "qb1", "position": "QB", "points": 22},
+        {"player_id": "rb1", "position": "RB", "points": 18},
+        {"player_id": "rb2", "position": "RB", "points": 14},
+        {"player_id": "wr1", "position": "WR", "points": 16},
+        {"player_id": "wr2", "position": "WR", "points": 12},
+        {"player_id": "te1", "position": "TE", "points": 9},
+        {"player_id": "rb3", "position": "RB", "points": 11},
+        {"player_id": "wr3", "position": "WR", "points": 10},
+        {"player_id": "k1", "position": "K", "points": 8},
+        {"player_id": "def1", "position": "DEF", "points": 7},
+    ]
+
+    assignment, total = find_optimal_lineup(players, slots)
+
+    filled_slots = {slot for slot, _ in assignment}
+    assert filled_slots == {"QB", "RB", "WR", "TE", "FLEX", "K", "DEF"}
+    # Both FLEX slots should be filled by the best remaining RB/WR/TE (rb3=11, wr3=10), not left empty.
+    flex_players = {pid for slot, pid in assignment if slot == "FLEX"}
+    assert flex_players == {"rb3", "wr3"}
+    assert total == 22 + 18 + 14 + 16 + 12 + 9 + 11 + 10 + 8 + 7
+
+
+def test_real_espn_roster_shape_fills_correctly():
+    # Sean's actual ESPN Harrisburg League roster_positions from the DB.
+    slots = ["QB", "RB", "RB", "WR", "WR", "TE", "DEF", "K", "BN", "BN", "BN", "BN", "BN", "BN", "IR", "IR", "FLEX", "FLEX"]
+    players = [
+        {"player_id": "qb1", "position": "QB", "points": 20},
+        {"player_id": "rb1", "position": "RB", "points": 15},
+        {"player_id": "rb2", "position": "RB", "points": 12},
+        {"player_id": "wr1", "position": "WR", "points": 14},
+        {"player_id": "wr2", "position": "WR", "points": 10},
+        {"player_id": "te1", "position": "TE", "points": 8},
+        {"player_id": "def1", "position": "DEF", "points": 6},
+        {"player_id": "k1", "position": "K", "points": 5},
+    ]
+
+    assignment, total = find_optimal_lineup(players, slots)
+
+    filled_slots = {slot for slot, _ in assignment}
+    assert filled_slots == {"QB", "RB", "WR", "TE", "DEF", "K"}
+    # Only 8 real players for 8 real starting slots -- both FLEX spots go unfilled, not crash.
+    assert total == 20 + 15 + 12 + 14 + 10 + 8 + 6 + 5
 
 
 def test_slot_left_unfilled_when_no_eligible_player_remains():

@@ -14,6 +14,8 @@ class EspnPlayer(BaseModel):
 
     fullName: str | None = None
     defaultPositionId: int | None = None
+    proTeamId: int | None = None
+    injuryStatus: str | None = None
     stats: list[EspnPlayerStat] = []
 
 

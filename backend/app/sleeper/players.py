@@ -24,10 +24,16 @@ async def sync_players(session: AsyncSession, client: SleeperClient) -> None:
                     platform_player_id=platform_player_id,
                     position=raw.position,
                     name=name,
+                    gsis_id=raw.gsis_id,
+                    team=raw.team,
+                    injury_status=raw.injury_status,
                 )
             )
         else:
             player.position = raw.position
             player.name = name
+            player.gsis_id = raw.gsis_id
+            player.team = raw.team
+            player.injury_status = raw.injury_status
 
     await session.commit()

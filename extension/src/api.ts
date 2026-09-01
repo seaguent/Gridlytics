@@ -3,6 +3,8 @@ export interface LeagueInfo {
   season: string;
   status: string;
   current_week: number;
+  scoring_is_custom: boolean;
+  scoring_notes: string[];
 }
 
 export interface StandingRow {
@@ -75,11 +77,25 @@ export interface RankingRow {
   name: string;
   position: string;
   projected_points: number;
+  sources: string[];
   value_over_replacement: number;
   value_score: number;
   floor: number | null;
   ceiling: number | null;
   confidence: number | null;
+  target_share: number | null;
+  targets: number | null;
+  carries: number | null;
+  usage_trend: string | null;
+  snap_share: number | null;
+  red_zone_opportunities: number | null;
+  injury_status: string | null;
+  opponent: string | null;
+  matchup_rating: number | null;
+  experience_status: string | null;
+  games_played: number;
+  season_target_share: number | null;
+  recent_target_share: number | null;
 }
 
 interface ApiGetResponse<T> {

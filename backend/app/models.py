@@ -95,6 +95,9 @@ class Player(Base):
     platform_player_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     position: Mapped[str] = mapped_column(String(16))
     name: Mapped[str] = mapped_column(String(255))
+    gsis_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    team: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    injury_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
@@ -109,6 +112,56 @@ class ProjectionRecord(Base):
     name: Mapped[str] = mapped_column(String(255))
     position: Mapped[str] = mapped_column(String(16))
     projected_points: Mapped[float]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class PlayerUsageStats(Base):
+    __tablename__ = "player_usage_stats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_player_id: Mapped[str] = mapped_column(String(32))
+    season: Mapped[str] = mapped_column(String(8))
+    week: Mapped[int]
+    targets: Mapped[int | None] = mapped_column(nullable=True)
+    target_share: Mapped[float | None] = mapped_column(nullable=True)
+    carries: Mapped[int | None] = mapped_column(nullable=True)
+    snap_share: Mapped[float | None] = mapped_column(nullable=True)
+    red_zone_opportunities: Mapped[int | None] = mapped_column(nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class TeamDefenseStrength(Base):
+    __tablename__ = "team_defense_strength"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[str] = mapped_column(String(8))
+    team: Mapped[str] = mapped_column(String(8))
+    position: Mapped[str] = mapped_column(String(16))
+    points_allowed_avg: Mapped[float]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class TeamMatchup(Base):
+    __tablename__ = "team_matchups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[str] = mapped_column(String(8))
+    week: Mapped[int]
+    team: Mapped[str] = mapped_column(String(8))
+    opponent: Mapped[str] = mapped_column(String(8))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class PlayerSeasonBaseline(Base):
+    __tablename__ = "player_season_baselines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_player_id: Mapped[str] = mapped_column(String(32))
+    season: Mapped[str] = mapped_column(String(8))
+    team: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    target_share: Mapped[float | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 

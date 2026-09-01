@@ -113,11 +113,15 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
                     platform_player_id=roster_fields["platform_player_id"],
                     position=roster_fields["position"],
                     name=roster_fields["player_name"],
+                    team=roster_fields["team"],
+                    injury_status=roster_fields["injury_status"],
                 )
             )
         else:
             player.position = roster_fields["position"]
             player.name = roster_fields["player_name"]
+            player.team = roster_fields["team"]
+            player.injury_status = roster_fields["injury_status"]
 
         result = await session.execute(
             select(RosterSlot).where(

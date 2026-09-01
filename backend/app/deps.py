@@ -44,9 +44,7 @@ async def get_fresh_league(
     session: AsyncSession = Depends(get_session),
 ) -> League:
     if league.platform != "sleeper":
-        # ESPN (and any future non-public-API platform) has no stored
-        # credentials to refresh with -- it only gets updated when the
-        # client does an authenticated fetch and POSTs fresh data.
+        # Non-Sleeper platforms only update via an authenticated client POST, not a server-side refresh.
         return league
 
     now = datetime.now(UTC).replace(tzinfo=None)

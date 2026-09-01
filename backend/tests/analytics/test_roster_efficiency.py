@@ -25,8 +25,7 @@ async def test_compute_roster_efficiency_finds_a_better_lineup_than_what_was_sta
     db_session.add(matchup)
     await db_session.flush()
 
-    # Actual starters: QB1, RB1, RB2, WR1, TE1 (started in FLEX) = 20+15+10+12+8 = 65
-    # WR2 (18 pts) sat on the bench all week -- worse than TE1 in the FLEX slot.
+    # Starters QB1/RB1/RB2/WR1/TE1(FLEX) = 65 total; WR2 (18 pts) sat the bench over TE1 in FLEX.
     db_session.add_all(
         [
             Player(platform="sleeper", platform_player_id="qb1", position="QB", name="QB1"),

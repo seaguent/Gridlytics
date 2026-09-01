@@ -17,8 +17,7 @@ def test_value_over_replacement_matches_hand_calculation():
         _proj("rb3", "RB", 10),
         _proj("rb4", "RB", 5),
     ]
-    # 2 teams, roster has 1 QB slot and 2 RB slots (+ non-positional slots
-    # that don't affect replacement level calculation).
+    # 2 teams, 1 QB slot, 2 RB slots (other slots don't affect replacement level).
     roster_positions = ["QB", "RB", "RB", "WR", "TE", "BN", "BN"]
     num_teams = 2
 
@@ -36,8 +35,7 @@ def test_value_over_replacement_matches_hand_calculation():
 
 
 def test_value_over_replacement_handles_fewer_players_than_replacement_rank():
-    # Only 1 TE exists but the league needs 2 -> replacement level is 0,
-    # so the lone TE's full projection counts as their VOR.
+    # Only 1 TE exists but the league needs 2 -> replacement level is 0, so the full projection is the VOR.
     projections = [_proj("te1", "TE", 12)]
     roster_positions = ["TE", "TE", "BN"]
     num_teams = 1

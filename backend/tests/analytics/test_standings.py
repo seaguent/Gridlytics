@@ -23,8 +23,7 @@ def two_week_scores() -> pd.DataFrame:
 def test_expected_wins_matches_hand_calculation(two_week_scores):
     expected = compute_expected_wins(two_week_scores)
 
-    # Week 1 ranks (lowest to highest): D, B, C, A -> fractions 0, 1/3, 2/3, 1
-    # Week 2 ranks: D, B, A, C -> fractions 0, 1/3, 2/3, 1
+    # Week 1 ranks D,B,C,A -> fractions 0,1/3,2/3,1; week 2 ranks D,B,A,C -> fractions 0,1/3,2/3,1.
     assert expected["A"] == pytest.approx(1.667, abs=0.001)
     assert expected["B"] == pytest.approx(0.667, abs=0.001)
     assert expected["C"] == pytest.approx(1.667, abs=0.001)
@@ -54,11 +53,7 @@ def two_week_scores_with_opponents() -> pd.DataFrame:
 
 
 def test_schedule_strength_matches_hand_calculation(two_week_scores_with_opponents):
-    # Season averages: A=97.5, B=82.5, C=95, D=65
-    # A faced B then C -> avg(82.5, 95) = 88.75
-    # B faced A then D -> avg(97.5, 65) = 81.25
-    # C faced D then A -> avg(65, 97.5) = 81.25
-    # D faced C then B -> avg(95, 82.5) = 88.75
+    # Season averages A=97.5 B=82.5 C=95 D=65; each team's strength is the avg of its two opponents' averages.
     strength = compute_schedule_strength(two_week_scores_with_opponents)
 
     assert strength["A"] == pytest.approx(88.75, abs=0.01)

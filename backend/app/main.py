@@ -23,25 +23,30 @@ from app.deps import get_current_league, get_fresh_league, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
 from app.models import Base, League, LeagueConnection, Team
+from app.nflverse.client import NflverseClient
+from app.nflverse.sync import sync_usage_stats
 from app.projections.ensemble import EnsembleProjectionProvider
 from app.projections.espn import ESPNProjectionProvider
 from app.projections.historical import HistoricalAverageProjectionProvider
+from app.projections.nflverse_metrics import NflverseMetricsProvider
 from app.projections.sleeper import SleeperProjectionProvider
 from app.projections.value import compute_value_over_replacement
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
+from app.sleeper.scoring import detect_custom_scoring
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # No real migration tool yet (that's Phase 20) -- create_all is safe to
-    # run on every startup since it only creates tables that don't exist.
+    # No Alembic yet (Phase 20) -- create_all only creates missing tables, safe to run every startup.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
 
 
 app = FastAPI(title="Gridlytics API", lifespan=lifespan)
+
+NO_USAGE_TRACKING_POSITIONS = {"DEF", "K"}
 
 
 @app.get("/health")
@@ -92,6 +97,12 @@ async def create_espn_connection(
     raw = EspnLeagueResponse.model_validate(body.raw_league_data)
     league = await espn_sync_league(session, raw)
 
+    nflverse_client = NflverseClient()
+    try:
+        await sync_usage_stats(session, nflverse_client, league)
+    finally:
+        await nflverse_client.aclose()
+
     session.add(LeagueConnection(league_id=league.id, access_token_hash=body.access_token_hash))
     await session.commit()
 
@@ -113,16 +124,30 @@ async def resync_espn_league(
 
     raw = EspnLeagueResponse.model_validate(body.raw_league_data)
     await espn_sync_league(session, raw)
+
+    nflverse_client = NflverseClient()
+    try:
+        await sync_usage_stats(session, nflverse_client, league)
+    finally:
+        await nflverse_client.aclose()
+
     return {"status": "ok"}
 
 
 @app.get("/leagues/me")
 async def get_league_info(league: League = Depends(get_fresh_league)) -> dict:
+    scoring_is_custom = False
+    scoring_notes: list[str] = []
+    if league.platform == "sleeper":
+        scoring_is_custom, scoring_notes = detect_custom_scoring(league.scoring_settings)
+
     return {
         "name": league.name,
         "season": league.season,
         "status": league.status,
         "current_week": league.current_week,
+        "scoring_is_custom": scoring_is_custom,
+        "scoring_notes": scoring_notes,
     }
 
 
@@ -319,21 +344,44 @@ async def get_rankings(
     vor_min, vor_max = min(vor_values), max(vor_values)
     vor_range = vor_max - vor_min
 
+    metrics_by_player = {
+        m.platform_player_id: m for m in await NflverseMetricsProvider().get_metrics(session, league)
+    }
+
     rows = []
     for p in projections:
         player_vor = vor.get(p.platform_player_id, 0.0)
         value_score = 50.0 if vor_range == 0 else (player_vor - vor_min) / vor_range * 100
+        metrics = metrics_by_player.get(p.platform_player_id)
+        # DEF/K structurally have no target share, snap share, etc. -- missing metrics for them means
+        # "not tracked", not "rookie", so they shouldn't get the rookie/limited-history label.
+        no_usage_data_default = "not_applicable" if p.position in NO_USAGE_TRACKING_POSITIONS else "rookie_or_limited_history"
         rows.append(
             {
                 "platform_player_id": p.platform_player_id,
                 "name": p.name,
                 "position": p.position,
                 "projected_points": p.projected_points,
+                "sources": p.sources,
                 "value_over_replacement": player_vor,
                 "value_score": value_score,
                 "floor": p.floor,
                 "ceiling": p.ceiling,
                 "confidence": p.confidence,
+                "target_share": metrics.target_share if metrics else None,
+                "targets": metrics.targets if metrics else None,
+                "carries": metrics.carries if metrics else None,
+                "usage_trend": metrics.usage_trend if metrics else None,
+                "snap_share": metrics.snap_share if metrics else None,
+                "red_zone_opportunities": metrics.red_zone_opportunities if metrics else None,
+                "injury_status": metrics.injury_status if metrics else None,
+                "opponent": metrics.opponent if metrics else None,
+                "matchup_rating": metrics.matchup_rating if metrics else None,
+                "experience_status": metrics.experience_status if metrics else no_usage_data_default,
+                "games_played": metrics.games_played if metrics else 0,
+                "season_target_share": metrics.season_target_share if metrics else None,
+                "recent_target_share": metrics.recent_target_share if metrics else None,
+                "availability": metrics.availability if metrics else None,
             }
         )
 

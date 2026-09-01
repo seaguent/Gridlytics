@@ -16,8 +16,7 @@ def test_compute_floor_ceiling_confidence_matches_hand_calculation():
 
 
 def test_compute_floor_ceiling_confidence_perfectly_consistent_player():
-    # Every game the same score -> zero variance -> full confidence,
-    # floor/ceiling collapse to the mean.
+    # Zero variance -> full confidence, floor/ceiling collapse to the mean.
     scores = pd.Series([15, 15, 15, 15])
 
     floor, ceiling, confidence = compute_floor_ceiling_confidence(scores)
@@ -27,16 +26,23 @@ def test_compute_floor_ceiling_confidence_perfectly_consistent_player():
     assert confidence == pytest.approx(1.0)
 
 
-def test_compute_floor_ceiling_confidence_single_data_point():
-    # A single game can't have a variance -- treat it the same as
-    # perfectly consistent (nothing to disagree with yet).
+def test_compute_floor_ceiling_confidence_single_data_point_is_insufficient():
+    # Fabricating confidence=1.0 from one data point is worse than admitting we don't know yet.
     scores = pd.Series([20])
 
     floor, ceiling, confidence = compute_floor_ceiling_confidence(scores)
 
-    assert floor == pytest.approx(20.0)
-    assert ceiling == pytest.approx(20.0)
-    assert confidence == pytest.approx(1.0)
+    assert floor is None
+    assert ceiling is None
+    assert confidence is None
+
+
+def test_compute_floor_ceiling_confidence_empty_series_is_insufficient():
+    floor, ceiling, confidence = compute_floor_ceiling_confidence(pd.Series([], dtype=float))
+
+    assert floor is None
+    assert ceiling is None
+    assert confidence is None
 
 
 def test_compute_floor_ceiling_confidence_never_goes_negative():

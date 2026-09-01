@@ -34,8 +34,7 @@ def three_team_stats() -> pd.DataFrame:
 
 
 def test_power_rankings_best_team_scores_100_worst_scores_0(three_team_stats):
-    # A leads every single metric -> normalizes to 1.0 on all four -> 100.
-    # C trails every metric -> normalizes to 0.0 on all four -> 0.
+    # A leads every metric -> normalizes to 100; C trails every metric -> normalizes to 0.
     result = compute_power_rankings(three_team_stats)
 
     a_score = result.loc[result["team_id"] == "A", "power_score"].iloc[0]
@@ -46,9 +45,7 @@ def test_power_rankings_best_team_scores_100_worst_scores_0(three_team_stats):
 
 
 def test_power_rankings_middle_team_matches_hand_calculation(three_team_stats):
-    # B is exactly at the midpoint on win_pct/points/expected_win_pct (0.5
-    # normalized each), and (95-80)/(115-80) = 0.42857 on recent form.
-    # weighted: 0.5*0.35 + 0.5*0.25 + 0.5*0.25 + 0.42857*0.15 = 0.48929 -> 48.93
+    # B: 0.5 normalized on win_pct/points/expected_win_pct, 0.42857 on recent form -> weighted 48.93.
     result = compute_power_rankings(three_team_stats)
     b_score = result.loc[result["team_id"] == "B", "power_score"].iloc[0]
 
@@ -70,9 +67,7 @@ def test_power_rankings_handles_tied_metric_without_crashing():
 
     result = compute_power_rankings(tied_stats)
 
-    # win_pct, expected_win_pct, recent_points_per_game are tied for both
-    # teams (range=0) -> neutral 0.5 contribution each; points_per_game is
-    # the only differentiator, so X should still rank above Y.
+    # Everything but points_per_game is tied (range=0, neutral 0.5 each), so it's the only differentiator.
     x_score = result.loc[result["team_id"] == "X", "power_score"].iloc[0]
     y_score = result.loc[result["team_id"] == "Y", "power_score"].iloc[0]
     assert x_score > y_score

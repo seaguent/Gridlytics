@@ -13,7 +13,13 @@ def _mock_players() -> None:
         return_value=httpx.Response(
             200,
             json={
-                "100": {"position": "RB", "full_name": "Some Runningback"},
+                "100": {
+                    "position": "RB",
+                    "full_name": "Some Runningback",
+                    "gsis_id": "00-0012345",
+                    "team": "SF",
+                    "injury_status": "Questionable",
+                },
                 "999": {"position": None, "full_name": "Retired Guy"},
             },
         )
@@ -35,6 +41,9 @@ async def test_sync_players_stores_only_players_with_a_position(db_session):
     assert len(players) == 1
     assert players[0].platform_player_id == "100"
     assert players[0].position == "RB"
+    assert players[0].gsis_id == "00-0012345"
+    assert players[0].team == "SF"
+    assert players[0].injury_status == "Questionable"
 
 
 @pytest.mark.asyncio

@@ -15,13 +15,6 @@ class PlayerProjection:
 
 @dataclass
 class PlayerMetrics:
-    """Forward-looking contract for usage/availability data.
-
-    Nothing populates this yet -- no verified data source exists for these
-    fields on either platform. Defined now so the shape is settled before
-    any provider starts filling it in.
-    """
-
     platform_player_id: str
     snap_share: float | None = None
     targets: int | None = None
@@ -30,3 +23,10 @@ class PlayerMetrics:
     red_zone_opportunities: int | None = None
     usage_trend: str | None = None
     injury_status: str | None = None
+    opponent: str | None = None
+    matchup_rating: float | None = None
+    experience_status: str | None = None
+    games_played: int = 0
+    season_target_share: float | None = None
+    recent_target_share: float | None = None
+    availability: str | None = None

@@ -39,8 +39,7 @@ async def test_load_power_ranking_inputs(db_session):
 
     assert a_row["win_pct"] == pytest.approx(2 / 3)
     assert a_row["points_per_game"] == pytest.approx(100.0)
-    # Only 2 teams -> all-play expected wins equals actual wins each week
-    # (A scored higher weeks 1-2, B scored higher week 3).
+    # Only 2 teams -> all-play expected wins equals actual wins each week.
     assert a_row["expected_win_pct"] == pytest.approx(2 / 3)
     assert a_row["recent_points_per_game"] == pytest.approx(100.0)
 

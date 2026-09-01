@@ -255,6 +255,12 @@ export function Overlay({ league }: { league: OverlayLeague }) {
 
               {tab === "rankings" && (
                 <>
+                  {leagueInfo?.scoring_is_custom && (
+                    <div className="gl-scoring-note">
+                      Custom scoring detected — Sleeper's standard/PPR projections may not exactly match this
+                      league's settings.
+                    </div>
+                  )}
                   {rankingsError && <div className="gl-error">{rankingsError}</div>}
                   {!rankingsError && !rankings && <div className="gl-loading">Loading...</div>}
                   {rankings && (

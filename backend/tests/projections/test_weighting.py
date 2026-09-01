@@ -19,10 +19,7 @@ def five_week_scores() -> pd.DataFrame:
 
 
 def test_weighted_recent_form_matches_hand_calculation(five_week_scores):
-    # decay=0.7: weights (newest to oldest) = 1, 0.7, 0.49, 0.343, 0.2401
-    # weighted sum = 21*1 + 18*0.7 + 12*0.49 + 8*0.343 + 20*0.2401 = 47.026
-    # weight total = 1 + 0.7 + 0.49 + 0.343 + 0.2401 = 2.7731
-    # weighted mean = 47.026 / 2.7731 ~= 16.958
+    # decay=0.7 weights (newest to oldest) 1, 0.7, 0.49, 0.343, 0.2401 -> weighted mean ~= 16.958.
     result = compute_weighted_recent_form(five_week_scores, num_weeks=5, decay=0.7)
     assert result["A"] == pytest.approx(16.958, abs=0.005)
 
@@ -34,8 +31,7 @@ def test_weighted_recent_form_with_decay_one_equals_plain_average(five_week_scor
 
 
 def test_weighted_recent_form_reacts_faster_than_plain_average(five_week_scores):
-    # A low decay should pull the projection toward the most recent game (21)
-    # more than a plain average would.
+    # A low decay should pull the projection toward the most recent game (21) more than a plain average.
     plain_average = (20 + 8 + 12 + 18 + 21) / 5
     weighted = compute_weighted_recent_form(five_week_scores, num_weeks=5, decay=0.5)["A"]
     assert weighted > plain_average

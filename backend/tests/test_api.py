@@ -8,8 +8,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.deps import get_session
 from app.main import app
 from app.models import Base
+from app.nflverse.client import NFLVERSE_RELEASES_BASE_URL
 from app.sleeper.client import SLEEPER_BASE_URL
 from app.tokens import hash_token
+
+
+def _mock_nflverse_season_not_published(season: str) -> None:
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{season}.csv").mock(
+        return_value=httpx.Response(404)
+    )
 
 
 @pytest_asyncio.fixture
@@ -128,11 +135,102 @@ def test_create_connection_and_fetch_standings(client):
         "season": "2026",
         "status": "in_season",
         "current_week": 1,
+        "scoring_is_custom": False,
+        "scoring_notes": [],
     }
 
 
+@respx.mock
+def test_league_info_flags_custom_sleeper_scoring(client):
+    league_id = "custom1"
+    respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "league_id": league_id,
+                "name": "6pt Passing League",
+                "season": "2026",
+                "season_type": "regular",
+                "sport": "nfl",
+                "status": "in_season",
+                "total_rosters": 1,
+                "settings": {"leg": 1, "playoff_teams": 1, "playoff_week_start": 1},
+                "scoring_settings": {"pass_td": 6.0, "rec": 1.0},
+            },
+        )
+    )
+    respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}/rosters").mock(return_value=httpx.Response(200, json=[]))
+    respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}/users").mock(return_value=httpx.Response(200, json=[]))
+    respx.get(f"{SLEEPER_BASE_URL}/players/nfl").mock(return_value=httpx.Response(200, json={}))
+
+    connect_response = client.post(
+        "/connections",
+        json={
+            "platform": "sleeper",
+            "platform_league_id": league_id,
+            "access_token_hash": hash_token("custom-scoring-token"),
+        },
+    )
+    assert connect_response.status_code == 200
+
+    info_response = client.get(
+        "/leagues/me", headers={"Authorization": "Bearer custom-scoring-token"}
+    )
+    body = info_response.json()
+    assert body["scoring_is_custom"] is True
+    assert any("pass_td" in note for note in body["scoring_notes"])
+
+
+@respx.mock
+def test_rankings_does_not_label_a_defense_as_rookie_for_lacking_usage_stats(client):
+    import copy
+
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+
+    raw = copy.deepcopy(SAMPLE_RAW)
+    starter_qb = raw["teams"][0]["roster"]["entries"][0]
+    starter_qb["playerPoolEntry"]["player"]["stats"] = [
+        {"scoringPeriodId": 3, "statSourceId": 1, "appliedTotal": 18.2}
+    ]
+    raw["teams"][0]["roster"]["entries"].append(
+        {
+            "playerId": 999,
+            "lineupSlotId": 16,
+            "playerPoolEntry": {
+                "player": {
+                    "fullName": "Test Defense",
+                    "defaultPositionId": 16,
+                    "proTeamId": 12,
+                    "stats": [{"scoringPeriodId": 3, "statSourceId": 1, "appliedTotal": 8.0}],
+                }
+            },
+        }
+    )
+
+    connect_response = client.post(
+        "/connections/espn",
+        json={"raw_league_data": raw, "access_token_hash": hash_token("def-test-token")},
+    )
+    assert connect_response.status_code == 200
+
+    rankings_response = client.get(
+        "/leagues/me/rankings", headers={"Authorization": "Bearer def-test-token"}
+    )
+    assert rankings_response.status_code == 200
+    rows = {row["platform_player_id"]: row for row in rankings_response.json()}
+
+    assert rows["999"]["position"] == "DEF"
+    assert rows["999"]["experience_status"] == "not_applicable"
+    assert rows["111"]["experience_status"] == "rookie_or_limited_history"
+
+
+@respx.mock
 def test_espn_connection_and_resync_flow(client):
     from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
 
     connect_response = client.post(
         "/connections/espn",
@@ -144,8 +242,7 @@ def test_espn_connection_and_resync_flow(client):
     assert connect_response.status_code == 200
     assert connect_response.json()["name"] == "Test League"
 
-    # get_fresh_league must NOT attempt a Sleeper refresh for an ESPN league
-    # (no respx mock is set up here -- if it tried, this would error/hang).
+    # no respx mock set up here -- would hang if get_fresh_league tried a Sleeper refresh for this ESPN league
     standings_response = client.get(
         "/leagues/me/standings",
         headers={"Authorization": "Bearer espn-secret-token"},

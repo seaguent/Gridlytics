@@ -18,8 +18,7 @@ def test_simulate_season_with_no_remaining_games_is_fully_determined():
         num_trials=100,
     )
 
-    # No games left -> standings are already locked in by (wins, points_for):
-    # A(8,1200), B(6,1100), C(5,1150), D(2,900). Top 2 = A, B.
+    # No games left -> locked in by (wins, points_for): A(8,1200), B(6,1100), C(5,1150), D(2,900); top 2 = A, B.
     assert result["A"]["playoff_odds"] == 1.0
     assert result["B"]["playoff_odds"] == 1.0
     assert result["C"]["playoff_odds"] == 0.0

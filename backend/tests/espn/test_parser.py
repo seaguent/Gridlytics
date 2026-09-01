@@ -35,7 +35,14 @@ SAMPLE_RAW = {
                     {
                         "playerId": 111,
                         "lineupSlotId": 0,
-                        "playerPoolEntry": {"player": {"fullName": "Starter QB", "defaultPositionId": 1}},
+                        "playerPoolEntry": {
+                            "player": {
+                                "fullName": "Starter QB",
+                                "defaultPositionId": 1,
+                                "proTeamId": 12,
+                                "injuryStatus": "QUESTIONABLE",
+                            }
+                        },
                     },
                     {
                         "playerId": 112,
@@ -144,5 +151,8 @@ def test_parse_rosters_maps_position_and_starter_status():
 
     assert starter["position"] == "QB"
     assert starter["is_starter"] is True
+    assert starter["team"] == "KC"
+    assert starter["injury_status"] == "QUESTIONABLE"
     assert bench["position"] == "RB"
     assert bench["is_starter"] is False
+    assert bench["team"] is None

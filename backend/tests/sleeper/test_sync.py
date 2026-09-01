@@ -40,8 +40,7 @@ def _mock_league_and_players(league_id: str = "123") -> None:
         respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}/matchups/{week}").mock(
             return_value=httpx.Response(200, json=[])
         )
-    # rosters are empty, so sync_projections has no rostered player ids and
-    # returns early without ever calling the projections endpoint
+    # rosters are empty, so sync_projections returns early without calling the projections endpoint
 
 
 @pytest.mark.asyncio
@@ -68,9 +67,7 @@ async def test_refresh_league_syncs_every_week_up_to_playoffs(db_session):
 
     result = await db_session.execute(select(Matchup).where(Matchup.league_id == league.id))
     weeks_attempted = {matchup.week for matchup in result.scalars().all()}
-    # No matchups were mocked with actual data, so nothing gets created --
-    # this just confirms refresh_league ran without erroring across weeks
-    # 1-3 (playoff_week_start=4) and didn't try week 4 or beyond.
+    # Confirms refresh_league ran weeks 1-3 (playoff_week_start=4) without erroring and stopped there.
     assert weeks_attempted == set()
 
 
@@ -95,8 +92,7 @@ async def test_refresh_league_skips_player_sync_when_cache_is_fresh(db_session):
 
     result = await db_session.execute(select(Player))
     players = result.scalars().all()
-    # The mocked /players/nfl response (player "1") should NOT have been
-    # fetched, since the cache is fresh -- only the pre-existing row remains.
+    # Cache is fresh, so /players/nfl should not have been fetched -- only the pre-existing row remains.
     assert len(players) == 1
     assert players[0].platform_player_id == "999"
 

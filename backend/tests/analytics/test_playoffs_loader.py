@@ -44,9 +44,7 @@ async def test_load_simulation_inputs_computes_records_and_score_distributions(d
     assert team_score_dist[team_a.id]["mean"] == pytest.approx(100.0)
     assert team_score_dist[team_a.id]["std"] == pytest.approx(10.0)
 
-    # Team B has only 1 score -> mean is that score, std falls back to the
-    # league-wide std (not enough data to estimate its own variance).
-    league_std = team_score_dist[team_a.id]["std"]  # not used directly; just documenting intent
+    # Team B has only 1 score -> std falls back to the league-wide std.
     assert team_score_dist[team_b.id]["mean"] == pytest.approx(95.0)
     assert team_score_dist[team_b.id]["std"] == pytest.approx(8.539, abs=0.01)
 

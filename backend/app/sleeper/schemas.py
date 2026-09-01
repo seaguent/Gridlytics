@@ -72,6 +72,9 @@ class SleeperPlayer(BaseModel):
 
     position: str | None = None
     full_name: str | None = None
+    gsis_id: str | None = None
+    team: str | None = None
+    injury_status: str | None = None
 
 
 class SleeperProjectionStats(BaseModel):
