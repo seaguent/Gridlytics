@@ -342,15 +342,17 @@ def test_rankings_does_not_label_a_defense_as_rookie_for_lacking_usage_stats(cli
     assert rows["999"]["position"] == "DEF"
     assert rows["999"]["experience_status"] == "not_applicable"
     assert rows["111"]["experience_status"] == "rookie_or_limited_history"
-    # No source="gridlytics" ProjectionRecord seeded in this flow -- fields must be null, not
-    # fabricated as zero.
-    assert rows["111"]["gridlytics_projected_points"] is None
+    # No source="gridlytics" ProjectionRecord seeded in this flow -- the raw base must be null,
+    # not fabricated. gridlytics_projected_points (the final blended figure) legitimately falls
+    # back to the platform's own number per compute_final_projection's missing-base rule.
+    assert rows["111"]["gridlytics_base_projection"] is None
+    assert rows["111"]["gridlytics_projected_points"] == pytest.approx(18.2)
     assert rows["111"]["gridlytics_dominant_category"] is None
     assert rows["111"]["gridlytics_lower_confidence"] is False
 
 
 @respx.mock
-def test_rankings_projected_points_is_the_blended_final_gridlytics_projection(client, test_engine):
+def test_rankings_platform_projection_stays_untouched_while_gridlytics_shows_the_blend(client, test_engine):
     import copy
 
     from sqlalchemy import select
@@ -400,7 +402,12 @@ def test_rankings_projected_points_is_the_blended_final_gridlytics_projection(cl
     assert row["gridlytics_base_projection"] == pytest.approx(16.0)
     assert row["platform_projection"] == pytest.approx(12.0)
     assert row["final_gridlytics_projection"] == pytest.approx(14.0)
-    assert row["projected_points"] == pytest.approx(14.0)
+    # "projected_points" (the primary "X proj" UI field) is ESPN's own real number, completely
+    # untouched by the blend.
+    assert row["projected_points"] == pytest.approx(12.0)
+    # "Gridlytics" in the UI is the blend, and must differ from the untouched platform number.
+    assert row["gridlytics_projected_points"] == pytest.approx(14.0)
+    assert row["projected_points"] != pytest.approx(row["gridlytics_projected_points"])
 
 
 @respx.mock

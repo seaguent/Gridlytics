@@ -424,7 +424,9 @@ async def get_rankings(
                 "platform_player_id": p.platform_player_id,
                 "name": p.name,
                 "position": p.position,
-                "projected_points": final_by_player.get(p.platform_player_id),
+                # The primary "X proj" field is the untouched ESPN/Sleeper platform number --
+                # NEVER the blend. Gridlytics' own (blended) opinion is a separate field below.
+                "projected_points": platform_projection_by_player.get(p.platform_player_id),
                 "sources": p.sources,
                 "value_over_replacement": player_vor,
                 "value_score": value_score,
@@ -436,10 +438,10 @@ async def get_rankings(
                 "gridlytics_base_projection": native.projected_points if native else None,
                 "platform_projection": platform_projection_by_player.get(p.platform_player_id),
                 "final_gridlytics_projection": final_by_player.get(p.platform_player_id),
-                # Kept exactly as before (our own raw model number, null when we have none) --
-                # this field predates the blend and is a distinct explainability value from
-                # final_gridlytics_projection, not an alias for it.
-                "gridlytics_projected_points": native.projected_points if native else None,
+                # "Gridlytics" in the UI is the blended final number, not the raw base --
+                # comparing this against "projected_points" (pure platform) is the real,
+                # user-facing ESPN-vs-Gridlytics comparison.
+                "gridlytics_projected_points": final_by_player.get(p.platform_player_id),
                 "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
                 "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
                 "gridlytics_dominant_category": native.dominant_category if native else None,

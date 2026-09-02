@@ -371,7 +371,9 @@ async def test_compute_start_sit_includes_gridlytics_projection_when_available(d
     result = await compute_start_sit(db_session, league, team)
 
     row = result["starters"][0]
-    assert row["gridlytics_projected_points"] == pytest.approx(15.5)
+    # gridlytics_projected_points is now the blended final ((15.5 + 12.0) / 2), not the raw base.
+    assert row["gridlytics_projected_points"] == pytest.approx(13.75)
+    assert row["gridlytics_base_projection"] == pytest.approx(15.5)
     assert row["gridlytics_expected_opportunities"] == pytest.approx(6.2)
     assert row["gridlytics_prior_season_weight"] == pytest.approx(0.3)
     assert row["gridlytics_dominant_category"] == "receiving"
@@ -394,15 +396,20 @@ async def test_compute_start_sit_gridlytics_fields_null_when_no_native_projectio
     result = await compute_start_sit(db_session, league, team)
 
     row = result["starters"][0]
-    assert row["gridlytics_projected_points"] is None
+    # No gridlytics base at all -- the blend falls back to the platform's own number (12.0)
+    # rather than fabricating a zero, per compute_final_projection's missing-base rule.
+    assert row["gridlytics_base_projection"] is None
+    assert row["gridlytics_projected_points"] == pytest.approx(12.0)
     assert row["gridlytics_dominant_category"] is None
 
 
 @pytest.mark.asyncio
-async def test_compute_start_sit_headline_projected_points_is_the_blended_final(db_session):
-    # The row's primary "projected_points" (what the optimizer maximizes and the card headline
-    # shows) must be the 50/50 blend, not the raw multi-source ensemble average and not the
-    # unblended Gridlytics base alone.
+async def test_compute_start_sit_platform_projection_stays_untouched_while_gridlytics_shows_the_blend(db_session):
+    # The row's primary "projected_points" (the "X proj" field the UI shows as the headline
+    # number) must be ESPN's/Sleeper's own real projection, completely untouched by the blend.
+    # Gridlytics' own (blended) opinion lives in the separate
+    # final_gridlytics_projection/gridlytics_projected_points fields, and drives the
+    # optimizer/sort internally, but never overwrites the platform display.
     league = await _make_league(db_session, "espn", current_week=1)
     league.roster_positions = ["WR"]
     team = await _make_team(db_session, league)
@@ -424,7 +431,11 @@ async def test_compute_start_sit_headline_projected_points_is_the_blended_final(
     assert row["gridlytics_base_projection"] == pytest.approx(15.5)
     assert row["platform_projection"] == pytest.approx(12.0)
     assert row["final_gridlytics_projection"] == pytest.approx(13.75)
-    assert row["projected_points"] == pytest.approx(13.75)
+    # ESPN's own number, unmodified -- NOT the blend.
+    assert row["projected_points"] == pytest.approx(12.0)
+    # Gridlytics' own number IS the blend, and must differ from the untouched platform number.
+    assert row["gridlytics_projected_points"] == pytest.approx(13.75)
+    assert row["projected_points"] != pytest.approx(row["gridlytics_projected_points"])
 
 
 @pytest.mark.asyncio
@@ -445,7 +456,10 @@ async def test_compute_start_sit_missing_platform_projection_uses_gridlytics_bas
     row = result["starters"][0]
     assert row["platform_projection"] is None
     assert row["final_gridlytics_projection"] == pytest.approx(15.5)
-    assert row["projected_points"] == pytest.approx(15.5)
+    # No real ESPN number exists -- the platform display field stays genuinely empty rather than
+    # silently showing Gridlytics' own number under the platform's label.
+    assert row["projected_points"] is None
+    assert row["gridlytics_projected_points"] == pytest.approx(15.5)
 
 
 @pytest.mark.asyncio
@@ -502,6 +516,11 @@ async def test_compute_start_sit_suspicious_zero_without_unavailable_status_uses
     result = await compute_start_sit(db_session, league, team)
 
     row = result["starters"][0]
+    # Gridlytics' own number correctly falls back to the base rather than averaging toward the
+    # suspicious platform zero.
     assert row["final_gridlytics_projection"] == pytest.approx(15.5)
-    assert row["projected_points"] == pytest.approx(15.5)
+    assert row["gridlytics_projected_points"] == pytest.approx(15.5)
+    # But the platform display field shows exactly what ESPN reported (0.0) -- untouched, even
+    # though it's the suspicious value the blend itself chose not to trust.
+    assert row["projected_points"] == pytest.approx(0.0)
     assert row["gridlytics_lower_confidence"] is False
