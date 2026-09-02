@@ -342,6 +342,11 @@ def test_rankings_does_not_label_a_defense_as_rookie_for_lacking_usage_stats(cli
     assert rows["999"]["position"] == "DEF"
     assert rows["999"]["experience_status"] == "not_applicable"
     assert rows["111"]["experience_status"] == "rookie_or_limited_history"
+    # No source="gridlytics" ProjectionRecord seeded in this flow -- fields must be null, not
+    # fabricated as zero.
+    assert rows["111"]["gridlytics_projected_points"] is None
+    assert rows["111"]["gridlytics_dominant_category"] is None
+    assert rows["111"]["gridlytics_lower_confidence"] is False
 
 
 @respx.mock
@@ -386,6 +391,29 @@ def test_espn_connection_and_resync_flow(client):
     )
     team_one = next(row for row in standings_response.json() if row["display_name"] == "Team One")
     assert team_one["wins"] == 3
+
+
+@respx.mock
+def test_projection_accuracy_endpoint_returns_expected_shape(client):
+    _mock_sleeper_league()
+
+    connect_response = client.post(
+        "/connections",
+        json={
+            "platform": "sleeper",
+            "platform_league_id": "123",
+            "access_token_hash": hash_token("my-secret-token"),
+        },
+    )
+    assert connect_response.status_code == 200
+
+    response = client.get(
+        "/leagues/me/projection-accuracy", headers={"Authorization": "Bearer my-secret-token"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # No ProjectionRecord/RosterSlot data seeded in this test -- correctly empty, not fabricated.
+    assert body == {"all_available": [], "common_sample": []}
 
 
 def test_missing_authorization_header_returns_401(client):

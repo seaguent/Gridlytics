@@ -9,11 +9,32 @@ MODEL_NAIVE = "naive_position_average"
 MODEL_HISTORICAL = "historical_recency"
 
 
-def _player_games(df: pd.DataFrame, player_id: str, season: int, before_week: int | None) -> list[dict]:
-    mask = (df["player_id"] == player_id) & (df["season"] == season) & (df["season_type"] == "REG")
-    if before_week is not None:
-        mask &= df["week"] < before_week
-    return df[mask].sort_values("week").to_dict("records")
+def _index_games_by_player_season(df: pd.DataFrame) -> dict[tuple, list[dict]]:
+    """Materializes every (player_id, season) REG-season game list exactly once, instead of
+    re-filtering + to_dict("records")-ing the full (often 100+ column) weekly_stats frame per
+    player per week -- pandas' to_dict("records") is the dominant cost on a wide frame, and a
+    full-season backtest calls the old per-lookup version thousands of times. Grouping is applied
+    identically, so results are byte-identical to the old per-lookup approach; this is purely a
+    performance change.
+    """
+    regular_season = df[df["season_type"] == "REG"].sort_values("week")
+    grouped: dict[tuple, list[dict]] = {}
+    # One large to_dict("records") call, then group in plain Python -- pandas' to_dict("records")
+    # has enough fixed per-call overhead that calling it once per (player, season) group (thousands
+    # of small calls) is slower in aggregate than one call over the whole frame. Global sort by
+    # week above means each player's appended list ends up week-ascending without a per-group sort.
+    for row in regular_season.to_dict("records"):
+        grouped.setdefault((row["player_id"], row["season"]), []).append(row)
+    return grouped
+
+
+def _player_games(
+    indexed_games: dict[tuple, list[dict]], player_id: str, season: int, before_week: int | None
+) -> list[dict]:
+    games = indexed_games.get((player_id, season), [])
+    if before_week is None:
+        return games
+    return [g for g in games if g["week"] < before_week]
 
 
 def _team_changed(prior_games: list[dict], actual_row: dict) -> bool:
@@ -22,8 +43,14 @@ def _team_changed(prior_games: list[dict], actual_row: dict) -> bool:
     return prior_games[-1].get("team") != actual_row.get("team")
 
 
-def run_backtest(weekly_stats: pd.DataFrame, season: int, weeks: list[int]) -> list[dict]:
+def run_backtest(
+    weekly_stats: pd.DataFrame,
+    season: int,
+    weeks: list[int],
+    td_shrinkage_opportunities: dict[str, float] | None = None,
+) -> list[dict]:
     regular_season = weekly_stats[weekly_stats["season_type"] == "REG"]
+    indexed_games = _index_games_by_player_season(weekly_stats)
     rows: list[dict] = []
 
     for week in weeks:
@@ -40,13 +67,14 @@ def run_backtest(weekly_stats: pd.DataFrame, season: int, weeks: list[int]) -> l
             if actual_points is None or pd.isna(actual_points):
                 continue
 
-            current_games = _player_games(weekly_stats, player_id, season, before_week=week)
-            prior_games = _player_games(weekly_stats, player_id, season - 1, before_week=None)
+            current_games = _player_games(indexed_games, player_id, season, before_week=week)
+            prior_games = _player_games(indexed_games, player_id, season - 1, before_week=None)
             experience_status = "veteran" if prior_games else "rookie_or_limited_history"
             team_changed = _team_changed(prior_games, actual_row)
 
             native_points = project_player_points(
-                position, current_games, prior_games or None, position_priors[position], team_changed
+                position, current_games, prior_games or None, position_priors[position], team_changed,
+                td_shrinkage_opportunities=td_shrinkage_opportunities,
             )
             naive_points = project_player_points(
                 position, current_games, prior_games or None, position_priors[position], team_changed,

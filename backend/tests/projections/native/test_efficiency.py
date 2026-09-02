@@ -44,3 +44,52 @@ def test_non_positive_position_average_skips_capping():
     result = estimate_player_efficiency(per_game, position_average=0.0)
     # weight = 2/8 = 0.25; uncapped avg = 0.15 -> 0.25*0.15 + 0.75*0.0 = 0.0375
     assert result == pytest.approx(0.0375)
+
+
+def test_full_confidence_opportunities_omitted_falls_back_to_games_based_weight():
+    # No opportunity-based params passed -- must reproduce the games-based path exactly, byte for
+    # byte, so every existing caller (production sync included) is untouched by this addition.
+    per_game = [0.9, 0.9]  # 2 games, same fixture as the small-sample games-based test
+    result = estimate_player_efficiency(
+        per_game, position_average=0.5, observed_opportunities=9999, full_confidence_opportunities=None,
+    )
+    assert result == pytest.approx(0.6)  # identical to test_small_sample_shrinks_heavily_toward_position_average
+
+
+def test_opportunity_based_shrinkage_ignores_games_played_entirely():
+    # 2 games, but a huge number of observed opportunities (e.g. a noisy TD rate over a long
+    # prior season) -- full_confidence_opportunities set means weight comes ONLY from
+    # observed_opportunities, not len(per_game_rates)=2.
+    per_game = [0.9, 0.9]
+    result = estimate_player_efficiency(
+        per_game, position_average=0.5, observed_opportunities=50, full_confidence_opportunities=100,
+    )
+    # weight = 50/100 = 0.5 -> 0.5*0.9 + 0.5*0.5 = 0.7 (NOT the games-based 0.6 from 2/8 games)
+    assert result == pytest.approx(0.7)
+
+
+def test_opportunity_based_shrinkage_caps_at_full_weight():
+    per_game = [0.9] * 3
+    result = estimate_player_efficiency(
+        per_game, position_average=0.5, observed_opportunities=500, full_confidence_opportunities=100,
+    )
+    assert result == pytest.approx(0.9)  # weight capped at 1.0, fully the player's own rate
+
+
+def test_opportunity_based_shrinkage_with_team_change_still_applies_discount():
+    per_game = [0.9] * 3
+    result = estimate_player_efficiency(
+        per_game, position_average=0.5, team_changed=True,
+        observed_opportunities=100, full_confidence_opportunities=100,
+    )
+    # weight = 1.0 * 0.5 (team-change discount) = 0.5 -> 0.5*0.9 + 0.5*0.5 = 0.7
+    assert result == pytest.approx(0.7)
+
+
+def test_opportunity_based_shrinkage_missing_observed_opportunities_treated_as_zero():
+    per_game = [0.9] * 3
+    result = estimate_player_efficiency(
+        per_game, position_average=0.5, full_confidence_opportunities=100,
+    )
+    # observed_opportunities omitted -> treated as 0 -> weight=0 -> fully the position average
+    assert result == pytest.approx(0.5)

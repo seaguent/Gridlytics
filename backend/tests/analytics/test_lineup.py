@@ -97,7 +97,7 @@ def test_bench_and_ir_slots_are_ignored_not_filled():
 
 
 def test_real_sleeper_roster_shape_fills_correctly():
-    # Sean's actual Sunday Funday roster_positions from the DB.
+    # A real Sleeper league's roster_positions shape from the DB.
     slots = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN"]
     players = [
         {"player_id": "qb1", "position": "QB", "points": 22},
@@ -123,7 +123,7 @@ def test_real_sleeper_roster_shape_fills_correctly():
 
 
 def test_real_espn_roster_shape_fills_correctly():
-    # Sean's actual ESPN Harrisburg League roster_positions from the DB.
+    # A real ESPN league's roster_positions shape from the DB.
     slots = ["QB", "RB", "RB", "WR", "WR", "TE", "DEF", "K", "BN", "BN", "BN", "BN", "BN", "BN", "IR", "IR", "FLEX", "FLEX"]
     players = [
         {"player_id": "qb1", "position": "QB", "points": 20},

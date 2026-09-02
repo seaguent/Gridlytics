@@ -1,4 +1,5 @@
 import gzip
+import io
 
 import httpx
 import pandas as pd
@@ -11,6 +12,7 @@ from app.models import (
     Player,
     PlayerUsageStats,
     PositionVolatilityPrior,
+    ProjectionRecord,
     RosterSlot,
     Team,
     TeamDefenseStrength,
@@ -31,12 +33,19 @@ SLEEPER_CROSSWALK_CSV = "sleeper_id,gsis_id,name\n7039,00-0023459,Cody White\n"
 
 WEEKLY_STATS_CSV = (
     "player_id,player_display_name,position,season,season_type,week,targets,target_share,carries,"
-    "opponent_team,fantasy_points_ppr\n"
-    "00-0039075,Puka Nacua,WR,2024,REG,1,10,0.28,1,SF,20.0\n"
-    "00-0039075,Puka Nacua,WR,2024,REG,2,12,0.31,0,SEA,18.0\n"
-    "00-0023459,Cody White,WR,2024,REG,1,3,0.05,0,SF,10.0\n"
-    "00-0011111,Someone Elsewhere,RB,2024,REG,1,6,0.10,4,SF,15.0\n"
-    "00-0039075,Puka Nacua,WR,2024,POST,19,15,0.4,2,SF,30.0\n"
+    "team,opponent_team,fantasy_points_ppr,receiving_yards,receiving_tds,receptions,rushing_yards,"
+    "rushing_tds,attempts,passing_yards,passing_tds,passing_interceptions\n"
+    "00-0039075,Puka Nacua,WR,2024,REG,1,10,0.28,1,LA,SF,20.0,120,1,7,5,0,0,0,0,0\n"
+    "00-0039075,Puka Nacua,WR,2024,REG,2,12,0.31,0,LA,SEA,18.0,110,1,6,0,0,0,0,0,0\n"
+    "00-0023459,Cody White,WR,2024,REG,1,3,0.05,0,SF,LA,10.0,30,0,2,0,0,0,0,0,0\n"
+    "00-0011111,Someone Elsewhere,RB,2024,REG,1,6,0.10,4,SF,LA,15.0,20,0,2,25,1,0,0,0,0\n"
+    "00-0039075,Puka Nacua,WR,2024,POST,19,15,0.4,2,LA,SF,30.0,150,2,10,10,0,0,0,0,0\n"
+    # Real starting QBs on both teams -- not crosswalk-mapped/rostered by anyone, but needed so
+    # each team's real total pass attempts (used by the validated team-volume prior/A+B model)
+    # isn't artificially zero just because no rostered player happens to be the passer.
+    "00-0088001,Team LA QB,QB,2024,REG,1,0,0.0,1,LA,SF,18.0,0,0,0,3,0,32,230,2,0\n"
+    "00-0088001,Team LA QB,QB,2024,REG,2,0,0.0,2,LA,SEA,16.0,0,0,0,5,0,30,210,1,0\n"
+    "00-0088002,Team SF QB,QB,2024,REG,1,0,0.0,2,SF,LA,14.0,0,0,0,4,0,28,190,1,0\n"
 )
 
 SNAP_COUNTS_CSV = "pfr_player_id,season,week,game_type,offense_pct\nNacuPu00,2024,1,REG,0.91\n"
@@ -46,7 +55,18 @@ PBP_CSV = (
     "REG,1,12,1,0,00-0039075,\n"
 )
 
-SCHEDULE_CSV = "season,week,home_team,away_team\n2024,1,LA,SF\n"
+SCHEDULE_CSV = (
+    "season,week,home_team,away_team,gameday\n"
+    "2024,1,LA,SF,2024-09-08\n"
+    "2024,2,LA,SEA,2024-09-15\n"
+)
+
+DEPTH_CHARTS_CSV = (
+    "dt,team,gsis_id,pos_abb,pos_rank\n"
+    "2024-08-01T00:00:00Z,LA,00-0039075,WR,1\n"
+    "2024-08-01T00:00:00Z,SF,00-0023459,WR,2\n"
+    "2024-08-01T00:00:00Z,SF,00-0011111,RB,1\n"
+)
 
 
 async def _make_league(db_session, platform: str, season: str = "2024") -> League:
@@ -77,18 +97,25 @@ def _mock_nflverse(season: str = "2024") -> None:
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/snap_counts/snap_counts_{season}.csv").mock(
         return_value=httpx.Response(200, text=SNAP_COUNTS_CSV)
     )
-    prior_season = str(int(season) - 1)
-    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{prior_season}.csv").mock(
-        return_value=httpx.Response(404)
-    )
-    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{prior_season}.csv").mock(
-        return_value=httpx.Response(404)
-    )
+    # season-1 (offset 1) through season-4 (offset 4): season-1 is the "prior season" (fetched
+    # for baseline sync, mocked as not-yet-published/404 here) and season-2..4 are the extra
+    # real history the validated multi-year team prior and career prior both look back over.
+    for offset in range(1, 5):
+        year = str(int(season) - offset)
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/pbp/play_by_play_{season}.csv.gz").mock(
         return_value=httpx.Response(200, content=gzip.compress(PBP_CSV.encode()))
     )
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
         return_value=httpx.Response(200, text=SCHEDULE_CSV)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_{season}.csv").mock(
+        return_value=httpx.Response(200, text=DEPTH_CHARTS_CSV)
     )
 
 
@@ -257,9 +284,7 @@ async def test_sync_usage_stats_manual_override_wins_over_every_other_tier(db_se
 @respx.mock
 async def test_sync_matchup_context_persists_defense_strength_and_schedule(db_session):
     league = await _make_league(db_session, "espn")
-    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
-        return_value=httpx.Response(200, text=SCHEDULE_CSV)
-    )
+    schedule_df = pd.read_csv(io.StringIO(SCHEDULE_CSV))
 
     weekly_stats_df = pd.DataFrame(
         [
@@ -268,9 +293,7 @@ async def test_sync_matchup_context_persists_defense_strength_and_schedule(db_se
         ]
     )
 
-    client = NflverseClient()
-    await sync_matchup_context(db_session, client, league, weekly_stats_df)
-    await client.aclose()
+    await sync_matchup_context(db_session, league, weekly_stats_df, schedule_df)
 
     result = await db_session.execute(select(TeamDefenseStrength))
     strength_rows = result.scalars().all()
@@ -327,6 +350,19 @@ async def test_sync_usage_stats_still_syncs_prior_season_baseline_when_current_s
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2098.csv").mock(
         return_value=httpx.Response(404)
     )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2099.csv").mock(
+        return_value=httpx.Response(404)
+    )
+    # Career-prior/team-prior lookback reaches back 4 seasons (2098-2095) -- 2098 is mocked with
+    # real data above, the other 3 have none published (real preseason scenario: even 2098's
+    # season-aggregate file might be all that's out yet).
+    for year in (2097, 2096, 2095):
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
 
     client = NflverseClient()
     await sync_usage_stats(db_session, client, league)
@@ -357,10 +393,10 @@ async def test_sync_usage_stats_persists_prior_season_weekly_scores(db_session):
         return_value=httpx.Response(
             200,
             text=(
-                "player_id,player_display_name,position,season_type,week,targets,target_share,carries,"
-                "fantasy_points_ppr\n"
-                "00-0039075,Puka Nacua,WR,REG,1,9,0.25,0,17.5\n"
-                "00-0039075,Puka Nacua,WR,POST,19,5,0.2,0,9.0\n"
+                "player_id,player_display_name,position,team,season,season_type,week,targets,target_share,carries,"
+                "attempts,fantasy_points_ppr\n"
+                "00-0039075,Puka Nacua,WR,LA,2023,REG,1,9,0.25,0,0,17.5\n"
+                "00-0039075,Puka Nacua,WR,LA,2023,POST,19,5,0.2,0,0,9.0\n"
             ),
         )
     )
@@ -387,14 +423,14 @@ async def test_sync_usage_stats_persists_position_volatility_priors_from_prior_s
     await _add_rostered_player(db_session, league, "4426515")
     _mock_nflverse()
 
-    rows = ["player_id,player_display_name,position,season_type,week,fantasy_points_ppr"]
+    rows = ["player_id,player_display_name,position,team,season,season_type,week,carries,attempts,fantasy_points_ppr"]
     for player_id, scores in [
         ("rb-1", [8.0, 12.0, 4.0, 16.0]),
         ("rb-2", [16.0, 24.0, 8.0, 32.0]),
         ("rb-3", [6.0, 9.0, 3.0, 12.0]),
     ]:
         for week, score in enumerate(scores, start=1):
-            rows.append(f"{player_id},Someone,RB,REG,{week},{score}")
+            rows.append(f"{player_id},Someone,RB,SF,2023,REG,{week},0,0,{score}")
     respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2023.csv").mock(
         return_value=httpx.Response(200, text="\n".join(rows) + "\n")
     )
@@ -425,3 +461,171 @@ async def test_sync_usage_stats_noop_when_no_rostered_players(db_session):
 
     result = await db_session.execute(select(PlayerUsageStats))
     assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_writes_gridlytics_projection_for_rostered_player(db_session):
+    # current_week=2 so week-1 real data (both for this player's own history and for pooling
+    # position priors) is actually eligible -- before_week=1 (the default current_week) would
+    # exclude all of season 2024's own real rows from the leakage-safe priors entirely.
+    league = await _make_league(db_session, "espn")
+    league.current_week = 2
+    await _add_rostered_player(db_session, league, "4426515")
+    db_session.add(
+        Player(platform="espn", platform_player_id="4426515", position="WR", name="Puka Nacua", team="LA")
+    )
+    await db_session.commit()
+    _mock_nflverse()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.platform_player_id == "4426515", ProjectionRecord.source == "gridlytics"
+        )
+    )
+    record = result.scalar_one_or_none()
+    assert record is not None
+    assert record.projected_points >= 0
+    assert record.dominant_category == "receiving"
+    assert record.prior_season_weight is not None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_skips_def_and_k_for_gridlytics_projection(db_session):
+    league = await _make_league(db_session, "espn")
+    league.current_week = 2
+    await _add_rostered_player(db_session, league, "def-1")
+    db_session.add(Player(platform="espn", platform_player_id="def-1", position="DEF", name="Some Defense"))
+    await db_session.commit()
+    _mock_nflverse()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.platform_player_id == "def-1", ProjectionRecord.source == "gridlytics"
+        )
+    )
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_writes_gridlytics_projection_for_zero_history_rookie(db_session):
+    # This player is rostered and has a real Player row (with a real position), but appears
+    # nowhere in CROSSWALK_CSV or WEEKLY_STATS_CSV -- no nflverse history at all. Must still get
+    # a position-prior-based projection, never silently skipped. Direct regression test for the
+    # position-source bug caught during spec self-review.
+    # A second, crosswalk-mapped rostered player is included alongside the rookie -- a real
+    # league always has some well-known players, and sync_usage_stats's own player_to_gsis
+    # early-return would otherwise bail before ever reaching the native-projection step if the
+    # rookie were the *only* rostered player (a scenario that doesn't occur in practice).
+    league = await _make_league(db_session, "espn")
+    league.current_week = 2
+    await _add_rostered_player(db_session, league, "rookie-1")
+    db_session.add(Player(platform="espn", platform_player_id="rookie-1", position="RB", name="Rookie RB"))
+    team_result = await db_session.execute(select(Team).where(Team.league_id == league.id))
+    team = team_result.scalar_one()
+    db_session.add(
+        RosterSlot(team_id=team.id, week=1, platform_player_id="4426515", is_starter=True, points=0)
+    )
+    db_session.add(
+        Player(platform="espn", platform_player_id="4426515", position="WR", name="Puka Nacua", team="LA")
+    )
+    await db_session.commit()
+    _mock_nflverse()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.platform_player_id == "rookie-1", ProjectionRecord.source == "gridlytics"
+        )
+    )
+    record = result.scalar_one_or_none()
+    assert record is not None
+    assert record.projected_points is not None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_gridlytics_projection_uses_real_league_scoring_settings(db_session):
+    # Same real player, same real nflverse data -- the only difference is league scoring settings.
+    # A half-PPR + softer (-1.0) interception-penalty Sleeper league must NOT produce the same
+    # projected_points as a league with no scoring_settings captured at all (which must fall back
+    # to standard PPR, not silently claim league-specific accuracy it doesn't have).
+    ppr_league = await _make_league(db_session, "espn")
+    ppr_league.current_week = 2
+    await _add_rostered_player(db_session, ppr_league, "4426515")
+    db_session.add(
+        Player(platform="espn", platform_player_id="4426515", position="WR", name="Puka Nacua", team="LA")
+    )
+
+    half_ppr_league = await _make_league(db_session, "sleeper")
+    half_ppr_league.current_week = 2
+    half_ppr_league.scoring_settings = {"rec": 0.5, "pass_int": -1.0}
+    await _add_rostered_player(db_session, half_ppr_league, "4426515")
+    db_session.add(
+        Player(platform="sleeper", platform_player_id="4426515", position="WR", name="Puka Nacua", team="LA")
+    )
+    await db_session.commit()
+    _mock_nflverse()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, ppr_league)
+    await sync_usage_stats(db_session, client, half_ppr_league)
+    await client.aclose()
+
+    ppr_result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.league_id == ppr_league.id,
+            ProjectionRecord.platform_player_id == "4426515",
+            ProjectionRecord.source == "gridlytics",
+        )
+    )
+    half_ppr_result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.league_id == half_ppr_league.id,
+            ProjectionRecord.platform_player_id == "4426515",
+            ProjectionRecord.source == "gridlytics",
+        )
+    )
+    ppr_record = ppr_result.scalar_one()
+    half_ppr_record = half_ppr_result.scalar_one()
+    assert ppr_record.projected_points != pytest.approx(half_ppr_record.projected_points)
+    # Half-credit receptions dominate this WR's real profile -- the half-PPR total must be lower.
+    assert half_ppr_record.projected_points < ppr_record.projected_points
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_usage_stats_gridlytics_projection_is_idempotent(db_session):
+    league = await _make_league(db_session, "espn")
+    league.current_week = 2
+    await _add_rostered_player(db_session, league, "4426515")
+    db_session.add(
+        Player(platform="espn", platform_player_id="4426515", position="WR", name="Puka Nacua", team="LA")
+    )
+    await db_session.commit()
+    _mock_nflverse()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.platform_player_id == "4426515", ProjectionRecord.source == "gridlytics"
+        )
+    )
+    assert len(result.scalars().all()) == 1

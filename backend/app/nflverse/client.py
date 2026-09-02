@@ -44,6 +44,13 @@ class NflverseClient:
         response.raise_for_status()
         return pd.read_csv(io.BytesIO(response.content), low_memory=False)
 
+    async def get_depth_charts(self, season: str) -> pd.DataFrame:
+        response = await self._client.get(f"/depth_charts/depth_charts_{season}.csv")
+        if response.status_code == 404:
+            return pd.DataFrame()
+        response.raise_for_status()
+        return pd.read_csv(io.BytesIO(response.content), low_memory=False)
+
     async def get_schedule(self, season: str) -> pd.DataFrame:
         response = await self._client.get("/schedules/games.csv")
         response.raise_for_status()

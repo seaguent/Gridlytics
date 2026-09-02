@@ -22,9 +22,10 @@ from app.db import engine
 from app.deps import get_current_connection, get_current_league, get_fresh_league, get_my_team, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
-from app.models import Base, League, LeagueConnection, Team
+from app.models import Base, League, LeagueConnection, ProjectionRecord, Team
 from app.nflverse.client import NflverseClient
 from app.nflverse.sync import sync_usage_stats
+from app.projections.accuracy_pipeline import load_projection_accuracy
 from app.projections.ensemble import EnsembleProjectionProvider
 from app.projections.espn import ESPNProjectionProvider
 from app.projections.historical import HistoricalAverageProjectionProvider
@@ -381,11 +382,22 @@ async def get_rankings(
         m.platform_player_id: m for m in await NflverseMetricsProvider().get_metrics(session, league)
     }
 
+    result = await session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.league_id == league.id,
+            ProjectionRecord.week == league.current_week,
+            ProjectionRecord.source == "gridlytics",
+            ProjectionRecord.platform_player_id.in_([p.platform_player_id for p in projections]),
+        )
+    )
+    native_by_player = {r.platform_player_id: r for r in result.scalars()}
+
     rows = []
     for p in projections:
         player_vor = vor.get(p.platform_player_id, 0.0)
         value_score = 50.0 if vor_range == 0 else (player_vor - vor_min) / vor_range * 100
         metrics = metrics_by_player.get(p.platform_player_id)
+        native = native_by_player.get(p.platform_player_id)
         rows.append(
             {
                 "platform_player_id": p.platform_player_id,
@@ -400,6 +412,15 @@ async def get_rankings(
                 "confidence": p.confidence,
                 "range_source": p.range_source,
                 "sample_size": p.sample_size,
+                "gridlytics_projected_points": native.projected_points if native else None,
+                "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
+                "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
+                "gridlytics_dominant_category": native.dominant_category if native else None,
+                "gridlytics_lower_confidence": bool(
+                    metrics is not None
+                    and p.position == "TE"
+                    and metrics.experience_status == "rookie_or_limited_history"
+                ),
                 **metrics_to_dict(p.position, metrics),
             }
         )
@@ -417,3 +438,18 @@ async def get_start_sit(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await compute_start_sit(session, league, team)
+
+
+@app.get("/leagues/me/projection-accuracy")
+async def get_projection_accuracy(
+    league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
+) -> dict:
+    report = await load_projection_accuracy(session, league)
+    return {
+        "all_available": [
+            {"source": s.source, "mae": s.mae, "sample_size": s.sample_size} for s in report.all_available
+        ],
+        "common_sample": [
+            {"source": s.source, "mae": s.mae, "sample_size": s.sample_size} for s in report.common_sample
+        ],
+    }

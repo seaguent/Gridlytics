@@ -100,6 +100,11 @@ export interface RankingRow {
   season_target_share: number | null;
   recent_target_share: number | null;
   availability: string | null;
+  gridlytics_projected_points: number | null;
+  gridlytics_expected_opportunities: number | null;
+  gridlytics_prior_season_weight: number | null;
+  gridlytics_dominant_category: string | null;
+  gridlytics_lower_confidence: boolean;
 }
 
 export type StartSitAction = "start" | "bench" | "swap_in" | "swap_out" | "unavailable";
@@ -132,6 +137,11 @@ export interface StartSitPlayerRow {
   season_target_share: number | null;
   recent_target_share: number | null;
   availability: string | null;
+  gridlytics_projected_points: number | null;
+  gridlytics_expected_opportunities: number | null;
+  gridlytics_prior_season_weight: number | null;
+  gridlytics_dominant_category: string | null;
+  gridlytics_lower_confidence: boolean;
   recommended_slot?: string;
   swap_out_player_id?: string;
   swap_out_name?: string;
@@ -163,6 +173,17 @@ export interface StartSitResponse {
   unavailable: StartSitPlayerRow[];
   optimal_points: number;
   summary: StartSitSummary;
+}
+
+export interface SourceAccuracy {
+  source: string;
+  mae: number;
+  sample_size: number;
+}
+
+export interface ProjectionAccuracy {
+  all_available: SourceAccuracy[];
+  common_sample: SourceAccuracy[];
 }
 
 interface ApiGetResponse<T> {
@@ -233,4 +254,8 @@ export function setMyTeam(token: string, teamId: number): Promise<{ status: stri
 
 export function fetchStartSit(token: string): Promise<StartSitResponse> {
   return fetchJson("/leagues/me/start-sit", token);
+}
+
+export function fetchProjectionAccuracy(token: string): Promise<ProjectionAccuracy> {
+  return fetchJson("/leagues/me/projection-accuracy", token);
 }

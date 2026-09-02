@@ -189,3 +189,38 @@ async def test_get_play_by_play_returns_empty_dataframe_for_unpublished_season()
     await client.aclose()
 
     assert df.empty
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_depth_charts_parses_csv_into_dataframe():
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2025.csv").mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                "dt,team,player_name,espn_id,gsis_id,pos_grp_id,pos_grp,pos_id,pos_name,pos_abb,pos_slot,pos_rank\n"
+                "2025-09-01T00:00:00Z,SF,Test Player,1,00-1,1,Offense,1,Running Back,RB,1,1\n"
+            ),
+        )
+    )
+
+    client = NflverseClient()
+    df = await client.get_depth_charts("2025")
+    await client.aclose()
+
+    assert len(df) == 1
+    assert df.iloc[0]["pos_abb"] == "RB"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_depth_charts_returns_empty_dataframe_on_404():
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2099.csv").mock(
+        return_value=httpx.Response(404)
+    )
+
+    client = NflverseClient()
+    df = await client.get_depth_charts("2099")
+    await client.aclose()
+
+    assert df.empty

@@ -348,3 +348,52 @@ async def test_compute_start_sit_comparison_is_none_with_no_swap_partner(db_sess
 
     assert result["starters"][0]["action"] == "swap_in"
     assert result["starters"][0]["comparison"] is None
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_includes_gridlytics_projection_when_available(db_session):
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One"))
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="espn",
+                          name="WR One", position="WR", projected_points=12.0)
+    )
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="gridlytics",
+                          name="WR One", position="WR", projected_points=15.5,
+                          expected_opportunities=6.2, prior_season_weight=0.3, dominant_category="receiving")
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["starters"][0]
+    assert row["gridlytics_projected_points"] == pytest.approx(15.5)
+    assert row["gridlytics_expected_opportunities"] == pytest.approx(6.2)
+    assert row["gridlytics_prior_season_weight"] == pytest.approx(0.3)
+    assert row["gridlytics_dominant_category"] == "receiving"
+    assert row["gridlytics_lower_confidence"] is False
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_gridlytics_fields_null_when_no_native_projection(db_session):
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One"))
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="espn",
+                          name="WR One", position="WR", projected_points=12.0)
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["starters"][0]
+    assert row["gridlytics_projected_points"] is None
+    assert row["gridlytics_dominant_category"] is None
+    assert row["gridlytics_lower_confidence"] is False

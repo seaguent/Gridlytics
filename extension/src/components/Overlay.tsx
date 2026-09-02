@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import overlayStyles from "../overlay.css";
 import {
   fetchLeagueInfo,
+  fetchProjectionAccuracy,
   fetchRankings,
   fetchStartSit,
   fetchWeeklyRecap,
   LeagueInfo,
+  ProjectionAccuracy,
   RankingRow,
   setMyTeam,
   StartSitResponse,
@@ -63,6 +65,7 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   const [rankingsPosition, setRankingsPosition] = useState("ALL");
   const [rankings, setRankings] = useState<RankingRow[] | null>(null);
   const [rankingsError, setRankingsError] = useState<string | null>(null);
+  const [projectionAccuracy, setProjectionAccuracy] = useState<ProjectionAccuracy | null>(null);
 
   const [startSit, setStartSit] = useState<StartSitResponse | null>(null);
   const [startSitError, setStartSitError] = useState<string | null>(null);
@@ -107,6 +110,14 @@ export function Overlay({ league }: { league: OverlayLeague }) {
       .then(setRankings)
       .catch((err: Error) => setRankingsError(err.message));
   }, [token, tab, rankingsPosition, refreshKey]);
+
+  useEffect(() => {
+    if (!token || tab !== "rankings") return;
+    // Best-effort -- a failed accuracy fetch shouldn't block the rest of the Players tab.
+    fetchProjectionAccuracy(token)
+      .then(setProjectionAccuracy)
+      .catch(() => setProjectionAccuracy(null));
+  }, [token, tab, refreshKey]);
 
   useEffect(() => {
     if (!token || tab !== "startSit" || !leagueInfo?.my_team_id) return;
@@ -309,6 +320,19 @@ export function Overlay({ league }: { league: OverlayLeague }) {
                     <div className="gl-scoring-note">
                       Custom scoring detected — Sleeper's standard/PPR projections may not exactly match this
                       league's settings.
+                    </div>
+                  )}
+                  {projectionAccuracy && projectionAccuracy.common_sample.length > 0 ? (
+                    <div className="gl-accuracy-summary">
+                      {projectionAccuracy.common_sample.map((s) => (
+                        <span key={s.source}>
+                          {s.source}: {s.mae.toFixed(1)} MAE (n={s.sample_size})
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="gl-accuracy-summary gl-stat--muted">
+                      Gridlytics vs. platform accuracy: no completed weeks yet this season
                     </div>
                   )}
                   {rankingsError && <div className="gl-error">{rankingsError}</div>}

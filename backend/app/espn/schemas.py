@@ -95,12 +95,26 @@ class EspnScheduleSettings(BaseModel):
     playoffTeamCount: int = 6
 
 
+class EspnScoringItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    statId: int | None = None
+    points: float | None = None
+
+
+class EspnScoringSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    scoringItems: list[EspnScoringItem] = []
+
+
 class EspnSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str | None = None
     rosterSettings: EspnRosterSettings = EspnRosterSettings()
     scheduleSettings: EspnScheduleSettings = EspnScheduleSettings()
+    scoringSettings: EspnScoringSettings = EspnScoringSettings()
 
 
 class EspnMember(BaseModel):

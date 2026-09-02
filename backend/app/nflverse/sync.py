@@ -8,6 +8,7 @@ from app.models import (
     PlayerSeasonBaseline,
     PlayerUsageStats,
     PositionVolatilityPrior,
+    ProjectionRecord,
     RosterSlot,
     Team,
     TeamDefenseStrength,
@@ -26,7 +27,30 @@ from app.nflverse.crosswalk import (
     build_pfr_lookup,
     build_sleeper_lookup,
     normalize_name,
+    normalize_team,
 )
+from app.projections.blending import prior_season_weight
+from app.projections.comparative_backtest import _week_as_of_date
+from app.projections.context_aware.career_prior import compute_career_prior
+from app.projections.context_aware.career_prior_sync import build_career_seasons, fetch_season_stats_range
+from app.projections.context_aware.depth_chart import RoleInfo, load_current_roles_batch
+from app.projections.context_aware.model import (
+    CareerAwareBreakdown,
+    add_share_columns,
+    compute_share_priors_by_rank,
+    project_context_aware_points_detailed_v2,
+)
+from app.projections.context_aware.qb_context import compute_qb_context
+from app.projections.context_aware.team_context import TeamTendencies, compute_team_tendencies_v2
+from app.projections.context_aware.team_prior import LOOKBACK_SEASONS, RECENCY_DECAY, compute_team_prior_by_team
+from app.projections.native.categories import POSITION_CATEGORIES
+from app.projections.native.model import (
+    CategoryBreakdown,
+    NativeProjectionBreakdown,
+    compute_all_position_priors,
+    project_player_points_detailed,
+)
+from app.projections.scoring_rules import scoring_rules_for_league
 
 
 def _clean_float(value) -> float | None:
@@ -243,8 +267,204 @@ async def sync_position_volatility_priors(session: AsyncSession, season: str, we
     await session.commit()
 
 
+def _dominant_category(breakdown: NativeProjectionBreakdown | CareerAwareBreakdown):
+    # Works unchanged for either breakdown type -- both list a `.categories` sequence whose
+    # entries carry `.name`/`.expected_opportunities` (CategoryBreakdown and CategoryShareBreakdown
+    # respectively), the only two fields this needs.
+    if not breakdown.categories:
+        return None
+    # Ties prefer the first-listed category for that position -- breakdown.categories already
+    # preserves POSITION_CATEGORIES' order since it's built in that same loop order.
+    best = breakdown.categories[0]
+    for category in breakdown.categories[1:]:
+        if (category.expected_opportunities or 0) > (best.expected_opportunities or 0):
+            best = category
+    return best
+
+
+async def sync_context_aware_projections(
+    session: AsyncSession,
+    league: League,
+    weekly_stats: pd.DataFrame,
+    prior_weekly_stats: pd.DataFrame,
+    team_weekly_by_year: dict[int, pd.DataFrame],
+    season_stats_by_year: dict[int, pd.DataFrame],
+    depth_charts: pd.DataFrame,
+    schedule: pd.DataFrame,
+    rostered_player_ids: set[str],
+    player_to_gsis: dict[str, str],
+) -> None:
+    """The context-aware model (career prior + team/QB context) is the live "gridlytics" source.
+    The native model is kept and computed alongside purely as a documented fallback -- for the
+    rare rostered player the context-aware model has no real evidence to project at all (e.g. an
+    unknown depth-chart rank with zero career and zero current-season history), never as the
+    primary model."""
+    combined = pd.concat([prior_weekly_stats, weekly_stats], ignore_index=True) if not prior_weekly_stats.empty else weekly_stats
+    if combined.empty:
+        # No real nflverse data of any kind -- never fabricate an all-zero projection.
+        return
+    combined_with_shares = add_share_columns(combined)
+
+    season = int(league.season)
+    before_week = league.current_week
+    position_priors = compute_all_position_priors(combined, season=season, before_week=before_week)
+    scoring_rules = scoring_rules_for_league(league.platform, league.scoring_settings)
+
+    result = await session.execute(
+        select(Player).where(Player.platform == league.platform, Player.platform_player_id.in_(rostered_player_ids))
+    )
+    players_by_id = {p.platform_player_id: p for p in result.scalars()}
+
+    result = await session.execute(
+        select(PlayerSeasonBaseline).where(
+            PlayerSeasonBaseline.platform == league.platform,
+            PlayerSeasonBaseline.season == str(season - 1),
+        )
+    )
+    baseline_by_player = {row.platform_player_id: row for row in result.scalars()}
+
+    # Multi-year team prior replaces the brittle single-season carry-forward for every
+    # context-aware category.
+    multi_year_team_prior_by_team = compute_team_prior_by_team(
+        team_weekly_by_year, target_season=season, lookback=LOOKBACK_SEASONS, decay=RECENCY_DECAY,
+    )
+    team_tendencies_v2 = compute_team_tendencies_v2(
+        combined_with_shares, multi_year_team_prior_by_team, season=season, before_week=before_week,
+    )
+
+    as_of_date = _week_as_of_date(schedule, season, before_week)
+    roles_batch = load_current_roles_batch(depth_charts, as_of_date) if as_of_date is not None else {}
+    share_priors_by_rank = (
+        compute_share_priors_by_rank(combined_with_shares, depth_charts, season=season, before_week=before_week, as_of_date=as_of_date)
+        if as_of_date is not None else {}
+    )
+    teams_with_rostered_players = {
+        normalize_team(player.team) for player in players_by_id.values() if player.team
+    }
+    qb_context_by_team = (
+        {
+            team: compute_qb_context(
+                current_team=team, prior_season_team=team,
+                weekly_stats=combined, prior_weekly_stats=combined,
+                depth_charts=depth_charts, as_of_date=as_of_date, season=season, before_week=before_week,
+            )
+            for team in teams_with_rostered_players
+        }
+        if as_of_date is not None else {}
+    )
+
+    for platform_player_id in rostered_player_ids:
+        player = players_by_id.get(platform_player_id)
+        # Position must come from the app's own already-synced Player.position, not from
+        # nflverse rows -- a true zero-history rookie has no nflverse rows at all, and must
+        # still get a position-prior-based projection, not be silently skipped.
+        if player is None or player.position not in POSITION_CATEGORIES:
+            continue
+
+        gsis_id = player_to_gsis.get(platform_player_id)
+        current_games: list[dict] = []
+        prior_games: list[dict] = []
+        if gsis_id:
+            current_games = combined_with_shares[
+                (combined_with_shares["player_id"] == gsis_id) & (combined_with_shares["season"] == season)
+                & (combined_with_shares["season_type"] == "REG") & (combined_with_shares["week"] < before_week)
+            ].sort_values("week").to_dict("records")
+            prior_games = combined_with_shares[
+                (combined_with_shares["player_id"] == gsis_id) & (combined_with_shares["season"] == season - 1)
+                & (combined_with_shares["season_type"] == "REG")
+            ].sort_values("week").to_dict("records")
+
+        baseline = baseline_by_player.get(platform_player_id)
+        current_team = normalize_team(player.team)
+        prior_season_team = normalize_team(baseline.team) if baseline else None
+        team_changed = bool(current_team and prior_season_team and current_team != prior_season_team)
+
+        native_breakdown = project_player_points_detailed(
+            player.position, current_games, prior_games or None, position_priors.get(player.position, {}), team_changed,
+            scoring_rules=scoring_rules,
+        )
+
+        breakdown_new: CareerAwareBreakdown | None = None
+        if gsis_id and current_team is not None:
+            limited_seasons = {s: df for s, df in season_stats_by_year.items() if season - LOOKBACK_SEASONS <= s < season}
+            career_seasons = build_career_seasons(limited_seasons, gsis_id, season)
+            role = roles_batch.get((gsis_id, player.position))
+            if role is None:
+                fallback_confidence = "low" if roles_batch else "unknown"
+                role = RoleInfo(pos_rank=None, role_confidence=fallback_confidence, role_changed_recently=False)
+            qb_context = qb_context_by_team.get(current_team)
+            if qb_context is not None:
+                # No QB-change workload discount -- a directional test found no consistent effect
+                # on team pass volume. qb_changed stays purely informational, surfaced via the
+                # breakdown/qb_context.
+                career_prior = compute_career_prior(
+                    career_seasons, team_changed=team_changed, role_changed_recently=role.role_changed_recently,
+                )
+                tendencies = team_tendencies_v2.get(current_team, TeamTendencies(None, None))
+                breakdown_new = project_context_aware_points_detailed_v2(
+                    player.position, current_games, prior_games or None, career_prior, career_seasons,
+                    tendencies, role, qb_context, share_priors_by_rank, position_priors.get(player.position, {}),
+                    current_team=current_team, prior_season_team=prior_season_team,
+                    platform_points=None, availability_status="healthy", scoring_rules=scoring_rules,
+                )
+
+        if breakdown_new is not None and breakdown_new.total_points is not None:
+            projected_points = breakdown_new.total_points
+            dominant = _dominant_category(breakdown_new)
+        elif native_breakdown is not None:
+            # The context-aware model genuinely had nothing to say (e.g. unknown depth-chart rank
+            # with zero career and zero current-season evidence) -- fall back to native's own
+            # position-average-based projection rather than silently skipping a rostered player.
+            projected_points = native_breakdown.total_points
+            dominant = _dominant_category(native_breakdown)
+        else:
+            continue
+
+        # Same games-played-based blend weight either model actually used internally (current-
+        # season stats progressively outweigh prior-season/career priors as real games accumulate)
+        # -- real, computed here, not a fabricated per-category value.
+        prior_weight = prior_season_weight(len(current_games))
+        expected_opportunities = dominant.expected_opportunities if dominant else None
+        dominant_category = dominant.name if dominant else None
+
+        result = await session.execute(
+            select(ProjectionRecord).where(
+                ProjectionRecord.league_id == league.id,
+                ProjectionRecord.platform_player_id == platform_player_id,
+                ProjectionRecord.week == league.current_week,
+                ProjectionRecord.source == "gridlytics",
+            )
+        )
+        record = result.scalar_one_or_none()
+
+        if record is None:
+            session.add(
+                ProjectionRecord(
+                    league_id=league.id,
+                    platform_player_id=platform_player_id,
+                    week=league.current_week,
+                    source="gridlytics",
+                    name=player.name,
+                    position=player.position,
+                    projected_points=projected_points,
+                    expected_opportunities=expected_opportunities,
+                    prior_season_weight=prior_weight,
+                    dominant_category=dominant_category,
+                )
+            )
+        else:
+            record.name = player.name
+            record.position = player.position
+            record.projected_points = projected_points
+            record.expected_opportunities = expected_opportunities
+            record.prior_season_weight = prior_weight
+            record.dominant_category = dominant_category
+
+    await session.commit()
+
+
 async def sync_matchup_context(
-    session: AsyncSession, client: NflverseClient, league: League, weekly_stats: pd.DataFrame
+    session: AsyncSession, league: League, weekly_stats: pd.DataFrame, schedule: pd.DataFrame
 ) -> None:
     defense_strength = compute_position_defense_strength(weekly_stats)
     for _, row in defense_strength.iterrows():
@@ -268,7 +488,6 @@ async def sync_matchup_context(
         else:
             record.points_allowed_avg = row["points_allowed_avg"]
 
-    schedule = await client.get_schedule(league.season)
     for _, row in schedule.iterrows():
         week = int(row["week"])
         for team, opponent in ((row["home_team"], row["away_team"]), (row["away_team"], row["home_team"])):
@@ -295,7 +514,8 @@ async def sync_usage_stats(session: AsyncSession, client: NflverseClient, league
 
     # Prior-season baseline sync below must not depend on the CURRENT season's file existing yet.
     weekly_stats = await client.get_weekly_stats(league.season)
-    await sync_matchup_context(session, client, league, weekly_stats)
+    schedule = await client.get_schedule(league.season)
+    await sync_matchup_context(session, league, weekly_stats, schedule)
 
     crosswalk = await client.get_player_crosswalk()
 
@@ -340,6 +560,26 @@ async def sync_usage_stats(session: AsyncSession, client: NflverseClient, league
                     fantasy_points_ppr=_clean_float(row.get("fantasy_points_ppr")),
                 )
         await session.commit()
+
+    season = int(league.season)
+    depth_charts = await client.get_depth_charts(league.season)
+    season_stats_by_year = await fetch_season_stats_range(client, current_season=season, lookback=LOOKBACK_SEASONS)
+
+    # Multi-year team-volume history for the validated team prior -- season-1 is already fetched
+    # above (prior_weekly_stats); LOOKBACK_SEASONS-1 more real seasons back are needed too.
+    team_weekly_by_year: dict[int, pd.DataFrame] = {}
+    if not prior_weekly_stats.empty:
+        team_weekly_by_year[season - 1] = prior_weekly_stats
+    for offset in range(2, LOOKBACK_SEASONS + 1):
+        year = season - offset
+        df = await client.get_weekly_stats(str(year))
+        if not df.empty:
+            team_weekly_by_year[year] = df
+
+    await sync_context_aware_projections(
+        session, league, weekly_stats, prior_weekly_stats, team_weekly_by_year, season_stats_by_year,
+        depth_charts, schedule, rostered_player_ids, player_to_gsis,
+    )
 
     if weekly_stats.empty:
         return

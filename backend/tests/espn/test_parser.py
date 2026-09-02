@@ -21,6 +21,13 @@ SAMPLE_RAW = {
             }
         },
         "scheduleSettings": {"matchupPeriodCount": 14, "playoffTeamCount": 6},
+        "scoringSettings": {
+            "scoringItems": [
+                {"statId": 3, "points": 0.05},
+                {"statId": 41, "points": 0.5},
+                {"statId": 20, "points": -1.0},
+            ]
+        },
     },
     "teams": [
         {
@@ -112,6 +119,24 @@ def test_parse_league_builds_roster_positions_from_slot_counts():
     assert positions.count("BN") == 6
     assert positions.count("IR") == 1
     assert len(positions) == 16
+
+
+def test_parse_league_captures_real_scoring_settings_as_scoring_items():
+    league = parse_league(_sample())
+    scoring_items = league["scoring_settings"]["scoring_items"]
+
+    pass_yard_item = next(i for i in scoring_items if i["stat_id"] == 3)
+    reception_item = next(i for i in scoring_items if i["stat_id"] == 41)
+    int_item = next(i for i in scoring_items if i["stat_id"] == 20)
+    assert pass_yard_item["points"] == 0.05
+    assert reception_item["points"] == 0.5
+    assert int_item["points"] == -1.0
+
+
+def test_parse_league_missing_scoring_settings_produces_empty_scoring_items_not_a_default_claim():
+    raw = EspnLeagueResponse.model_validate({"id": 1, "seasonId": 2026})
+    league = parse_league(raw)
+    assert league["scoring_settings"] == {"scoring_items": []}
 
 
 def test_parse_teams_uses_name_field_when_present():

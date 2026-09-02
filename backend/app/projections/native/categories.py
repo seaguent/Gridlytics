@@ -46,6 +46,21 @@ POSITION_CATEGORIES: dict[str, list[RateCategory]] = {
     "TE": [RECEIVING],
 }
 
+# Maps (category_name, rate_name) -> the ScoringRules field that should supply its real
+# points-per-unit value, so a league's actual scoring settings can override the standard-PPR
+# defaults baked into rate_specs above without changing RateCategory's own shape or any of the
+# opportunity/efficiency estimation that consumes it.
+SCORING_FIELD_BY_CATEGORY_RATE: dict[tuple[str, str], str] = {
+    ("passing", "yards_per_attempt"): "pass_yard_points",
+    ("passing", "td_rate"): "pass_td_points",
+    ("passing", "int_rate"): "pass_int_points",
+    ("rushing", "yards_per_carry"): "rush_yard_points",
+    ("rushing", "td_rate"): "rush_td_points",
+    ("receiving", "yards_per_target"): "rec_yard_points",
+    ("receiving", "td_rate"): "rec_td_points",
+    ("receiving", "reception_rate"): "reception_points",
+}
+
 
 def add_rate_columns(weekly_stats: pd.DataFrame, category: RateCategory) -> pd.DataFrame:
     has_opportunity = weekly_stats[category.opportunity_column] > 0

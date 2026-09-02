@@ -112,6 +112,9 @@ class ProjectionRecord(Base):
     name: Mapped[str] = mapped_column(String(255))
     position: Mapped[str] = mapped_column(String(16))
     projected_points: Mapped[float]
+    expected_opportunities: Mapped[float | None] = mapped_column(nullable=True)
+    prior_season_weight: Mapped[float | None] = mapped_column(nullable=True)
+    dominant_category: Mapped[str | None] = mapped_column(String(16), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 

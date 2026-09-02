@@ -36,6 +36,21 @@ def parse_roster_positions(lineup_slot_counts: dict[str, int]) -> list[str]:
     return positions
 
 
+def parse_scoring_settings(raw: EspnLeagueResponse) -> dict:
+    """Produces the exact shape app.projections.scoring_rules.scoring_rules_from_espn expects:
+    {"scoring_items": [{"stat_id": int, "points": float}, ...]}. pointsOverrides is deliberately
+    not parsed -- its real trigger conditions (e.g. league size) aren't verified against a live
+    ESPN response, and guessing at them risks silently claiming a scoring value we didn't earn.
+    An item missing statId or points is dropped rather than guessed at.
+    """
+    items = [
+        {"stat_id": item.statId, "points": item.points}
+        for item in raw.settings.scoringSettings.scoringItems
+        if item.statId is not None and item.points is not None
+    ]
+    return {"scoring_items": items}
+
+
 def parse_league(raw: EspnLeagueResponse) -> dict:
     playoff_week_start = raw.settings.scheduleSettings.matchupPeriodCount + 1
     return {
@@ -47,6 +62,7 @@ def parse_league(raw: EspnLeagueResponse) -> dict:
         "current_week": raw.status.currentMatchupPeriod,
         "playoff_teams": raw.settings.scheduleSettings.playoffTeamCount,
         "playoff_week_start": playoff_week_start,
+        "scoring_settings": parse_scoring_settings(raw),
     }
 
 

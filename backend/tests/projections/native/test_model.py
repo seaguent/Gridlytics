@@ -1,7 +1,12 @@
 import pandas as pd
 import pytest
 
-from app.projections.native.model import compute_all_position_priors, project_player_points
+from app.projections.native.model import (
+    compute_all_position_priors,
+    project_player_points,
+    project_player_points_detailed,
+)
+from app.projections.scoring_rules import STANDARD_PPR, ScoringRules
 
 
 def _wr_game(targets, receiving_yards, receiving_tds, receptions):
@@ -115,3 +120,126 @@ def test_compute_all_position_priors_shape():
     assert result["WR"]["receiving"]["yards_per_target"] == pytest.approx(10.0)
     # No real QB rows in the synthetic data -- QB's priors must be present but empty, not fabricated.
     assert result["QB"]["passing"]["opportunity"] is None
+
+
+def test_detailed_breakdown_none_for_unknown_position():
+    assert project_player_points_detailed("DEF", [], None, {}) is None
+
+
+def test_detailed_breakdown_reports_expected_opportunities_and_prior_season_weight():
+    # Same scenario as test_established_player_blends_own_rate_into_position_prior:
+    # 8 real games, no prior season -- proves the breakdown's numbers match the
+    # already-verified total from that test exactly.
+    games = [_wr_game(10, 100, 1, 7) for _ in range(8)]
+    priors = {
+        "receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}
+    }
+    breakdown = project_player_points_detailed("WR", games, None, priors)
+
+    assert breakdown.total_points == pytest.approx(23.0)
+    assert len(breakdown.categories) == 1
+    category = breakdown.categories[0]
+    assert category.name == "receiving"
+    assert category.expected_opportunities == pytest.approx(10.0)
+    assert category.prior_season_weight == pytest.approx(0.0)  # 8 games played this season -> fully current
+
+
+def test_detailed_breakdown_exposes_shrunk_rates_per_rate_name():
+    # 8 full-confidence games at fixed real rates (10 targets, 7 receptions, 100 yards, 1 TD
+    # per game) -> observed rates should fully dominate the position prior with this much
+    # volume, so shrunk_rates should read back approximately the player's own real rates.
+    games = [_wr_game(10, 100, 1, 7) for _ in range(8)]
+    priors = {
+        "receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}
+    }
+    breakdown = project_player_points_detailed("WR", games, None, priors)
+
+    category = breakdown.categories[0]
+    assert set(category.shrunk_rates.keys()) == {"yards_per_target", "td_rate", "reception_rate"}
+    assert category.shrunk_rates["yards_per_target"] == pytest.approx(10.0, abs=0.5)
+    assert category.shrunk_rates["td_rate"] == pytest.approx(0.1, abs=0.02)
+    assert category.shrunk_rates["reception_rate"] == pytest.approx(0.7, abs=0.02)
+    assert category.points == pytest.approx(23.0)
+
+
+def test_project_player_points_matches_detailed_breakdown_total():
+    # Regression check: the wrapper must always agree with the detailed function's total,
+    # across a scenario that exercises the prior-season blend path.
+    prior_games = [_wr_game(10, 120, 1, 8) for _ in range(8)]
+    priors = {
+        "receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}
+    }
+    simple_result = project_player_points("WR", [], prior_games, priors)
+    detailed_result = project_player_points_detailed("WR", [], prior_games, priors)
+    assert simple_result == pytest.approx(detailed_result.total_points)
+
+
+def test_default_scoring_rules_matches_standard_ppr_exactly():
+    # No scoring_rules passed -- must produce byte-for-byte the same total as before this change,
+    # proving the refactor is behavior-preserving for every existing caller (backtests included).
+    games = [_wr_game(10, 100, 1, 7) for _ in range(8)]
+    priors = {"receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}}
+    default_result = project_player_points("WR", games, None, priors)
+    explicit_ppr_result = project_player_points("WR", games, None, priors, scoring_rules=STANDARD_PPR)
+    assert default_result == pytest.approx(23.0)  # matches the pre-existing, already-verified total
+    assert default_result == pytest.approx(explicit_ppr_result)
+
+
+def test_half_ppr_scoring_rules_produce_a_genuinely_different_lower_total():
+    games = [_wr_game(10, 100, 1, 7) for _ in range(8)]
+    priors = {"receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}}
+    half_ppr = ScoringRules(reception_points=0.5)
+    result = project_player_points("WR", games, None, priors, scoring_rules=half_ppr)
+    # Full breakdown: expected_opportunities=10.0, yards_per_target=10.0 (own rate), td_rate=0.1,
+    # reception_rate=0.7 (all own real rates, 8 games = full confidence).
+    # points = 10.0 * (10.0*0.1 + 0.1*6.0 + 0.7*0.5) = 10.0 * (1.0 + 0.6 + 0.35) = 19.5
+    assert result == pytest.approx(19.5)
+    assert result < 23.0  # strictly less than the PPR total -- half-credit receptions must matter
+
+
+def test_td_shrinkage_opportunities_omitted_matches_default_games_based_behavior():
+    # No td_shrinkage_opportunities passed -- must reproduce the pre-existing total exactly,
+    # proving every existing caller (production sync, prior backtests) is untouched.
+    games = [_wr_game(10, 100, 1, 7) for _ in range(8)]
+    priors = {"receiving": {"opportunity": 5.0, "yards_per_target": 8.0, "td_rate": 0.05, "reception_rate": 0.6}}
+    result = project_player_points("WR", games, None, priors)
+    assert result == pytest.approx(23.0)  # matches the pre-existing, already-verified total
+
+
+def test_td_shrinkage_opportunities_pulls_a_noisy_low_sample_td_rate_toward_position_average():
+    # A player with a real, extreme, low-opportunity TD outlier: 3 games, 30 total targets
+    # (well above FULL_CONFIDENCE_GAMES=8's implicit games-based confidence), but zero TDs.
+    # Under the OLD games-based shrinkage, 3 games = weight 3/8 = 0.375 toward his own (0.0) rate.
+    # Under the new opportunity-based shrinkage with a high full_confidence_opportunities, 30
+    # targets is still far from full confidence -- the player's real 0.0 TD rate should be
+    # trusted LESS (pulled harder toward the position average) than the games-based path would.
+    games = [
+        {"targets": 10, "receiving_yards": 90, "receiving_tds": 0, "receptions": 7}
+        for _ in range(3)
+    ]
+    priors = {"receiving": {"opportunity": 10.0, "yards_per_target": 9.0, "td_rate": 0.05, "reception_rate": 0.7}}
+
+    games_based = project_player_points_detailed("WR", games, None, priors)
+    opportunity_based = project_player_points_detailed(
+        "WR", games, None, priors, td_shrinkage_opportunities={"receiving": 200.0},
+    )
+
+    games_based_td_component = games_based.categories[0].points
+    opportunity_based_td_component = opportunity_based.categories[0].points
+    # Both use the same real 0.0 observed TD rate, same expected_opportunities, same yards/reception
+    # components -- the only difference is how much the td_rate=0.0 outlier gets trusted. Weaker
+    # trust in a 0.0 outlier means MORE points survive (less of his real rate gets zeroed out).
+    assert opportunity_based_td_component > games_based_td_component
+
+
+def test_custom_interception_penalty_changes_qb_total():
+    games = [
+        {"attempts": 30, "passing_yards": 250, "passing_tds": 2, "passing_interceptions": 2,
+         "carries": 0, "rushing_yards": 0, "rushing_tds": 0}
+        for _ in range(8)
+    ]
+    priors = {"passing": {"opportunity": 30.0, "yards_per_attempt": 8.0, "td_rate": 0.05, "int_rate": 0.05}}
+    standard_result = project_player_points("QB", games, None, priors)  # -2/INT default
+    custom_rules = ScoringRules(pass_int_points=-1.0)  # a real league's softer INT penalty
+    custom_result = project_player_points("QB", games, None, priors, scoring_rules=custom_rules)
+    assert custom_result > standard_result  # a softer INT penalty must raise the total

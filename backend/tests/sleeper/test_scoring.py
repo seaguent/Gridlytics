@@ -13,7 +13,7 @@ STANDARD_HALF_PPR = {
 
 
 def test_real_sean_league_scoring_is_not_flagged_as_custom():
-    # Sean's actual Sunday Funday scoring_settings, pulled live from Sleeper.
+    # A real Sleeper league's scoring_settings shape, pulled live from Sleeper.
     real_scoring = {
         "pass_yd": 0.04, "pass_td": 4.0, "pass_int": -1.0, "rush_yd": 0.1, "rush_td": 6.0,
         "rec": 0.5, "rec_yd": 0.1, "rec_td": 6.0, "rec_2pt": 2.0, "rush_2pt": 2.0, "pass_2pt": 2.0,

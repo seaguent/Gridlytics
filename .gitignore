@@ -4,3 +4,18 @@ docs/superpowers/
 __pycache__/
 *.pyc
 .env
+CLAUDE.md
+.pytest_cache/
+node_modules/
+
+# Scratch/debug output from research and validation scripts (backend/scripts/) -- never
+# committed, regenerated on demand by re-running the relevant script.
+*_raw.csv
+*_summary.csv
+*_results.csv
+*_output.txt
+*_output_*.txt
+*_postfix.txt
+*.log
+*.sqlite3
+*.db

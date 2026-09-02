@@ -3,6 +3,7 @@ import pytest
 
 from app.projections.native.categories import (
     POSITION_CATEGORIES,
+    SCORING_FIELD_BY_CATEGORY_RATE,
     add_rate_columns,
     extract_player_rate_series,
 )
@@ -44,3 +45,12 @@ def test_extract_player_rate_series_skips_zero_opportunity_games():
     ]
     result = extract_player_rate_series(games, receiving, "yards_per_target")
     assert result == [10.0]
+
+
+def test_scoring_field_mapping_covers_every_real_rate_name_in_every_category():
+    for categories in POSITION_CATEGORIES.values():
+        for category in categories:
+            for rate_name in category.rate_specs:
+                assert (category.name, rate_name) in SCORING_FIELD_BY_CATEGORY_RATE, (
+                    f"missing scoring field mapping for ({category.name}, {rate_name})"
+                )

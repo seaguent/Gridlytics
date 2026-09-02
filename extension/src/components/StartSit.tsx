@@ -1,4 +1,32 @@
 import { StartSitPlayerRow, StartSitResponse, StartSitSummary } from "../api";
+import { dominantCategoryLabel, priorSeasonWeightLabel } from "../nativeProjection";
+
+function GridlyticsRow({ row }: { row: StartSitPlayerRow }) {
+  if (row.gridlytics_projected_points === null || row.projected_points === null) return null;
+  const delta = row.gridlytics_projected_points - row.projected_points;
+  return (
+    <div className="gl-row-stats">
+      <span className="gl-stat">
+        Gridlytics {row.gridlytics_projected_points.toFixed(1)} ({delta >= 0 ? "↑" : "↓"} {Math.abs(delta).toFixed(1)})
+      </span>
+      {row.gridlytics_expected_opportunities !== null && (
+        <>
+          <span className="gl-stat-sep">·</span>
+          <span className="gl-stat gl-stat--muted">
+            {row.gridlytics_expected_opportunities.toFixed(1)} {dominantCategoryLabel(row.gridlytics_dominant_category)},{" "}
+            {priorSeasonWeightLabel(row.gridlytics_prior_season_weight)}
+          </span>
+        </>
+      )}
+      {row.gridlytics_lower_confidence && (
+        <>
+          <span className="gl-stat-sep">·</span>
+          <span className="gl-stat gl-stat--muted">Limited confidence for TE with little NFL history</span>
+        </>
+      )}
+    </div>
+  );
+}
 
 function SummaryBanner({ summary }: { summary: StartSitSummary }) {
   if (summary.changes_count === 0) {
@@ -65,6 +93,7 @@ function SwapCard({ row }: { row: StartSitPlayerRow }) {
           {row.swap_out_name} risk: {comparison.opponent_risks.join(", ")}
         </div>
       )}
+      <GridlyticsRow row={row} />
       <ReasonsDetails row={row} />
     </div>
   );
@@ -91,6 +120,7 @@ function ConfirmedCard({ row, showSlot }: { row: StartSitPlayerRow; showSlot?: b
           {row.projected_points !== null ? `${row.projected_points.toFixed(1)} proj` : "no projection"}
         </span>
       </div>
+      <GridlyticsRow row={row} />
       <ReasonsDetails row={row} />
     </div>
   );

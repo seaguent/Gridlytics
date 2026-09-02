@@ -1,4 +1,5 @@
 import { RankingRow } from "../api";
+import { dominantCategoryLabel, priorSeasonWeightLabel } from "../nativeProjection";
 import { rangeProvenanceText, rangeSourceShortLabel } from "../rangeSource";
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"] as const;
@@ -71,6 +72,33 @@ export function Rankings({
                 </>
               )}
             </div>
+            {row.gridlytics_projected_points !== null && (
+              <div className="gl-row-stats">
+                <span className="gl-stat">
+                  Gridlytics {row.gridlytics_projected_points.toFixed(1)}{" "}
+                  ({row.gridlytics_projected_points >= row.projected_points ? "↑" : "↓"}{" "}
+                  {Math.abs(row.gridlytics_projected_points - row.projected_points).toFixed(1)})
+                </span>
+                {row.gridlytics_expected_opportunities !== null && (
+                  <>
+                    <span className="gl-stat-sep">·</span>
+                    <span className="gl-stat gl-stat--muted">
+                      {row.gridlytics_expected_opportunities.toFixed(1)}{" "}
+                      {dominantCategoryLabel(row.gridlytics_dominant_category)},{" "}
+                      {priorSeasonWeightLabel(row.gridlytics_prior_season_weight)}
+                    </span>
+                  </>
+                )}
+                {row.gridlytics_lower_confidence && (
+                  <>
+                    <span className="gl-stat-sep">·</span>
+                    <span className="gl-stat gl-stat--muted">
+                      Limited confidence for TE with little NFL history
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
             {row.target_share === null && row.experience_status === "rookie_or_limited_history" ? (
               <div className="gl-row-stats">
                 <span className="gl-stat gl-stat--muted">
@@ -81,6 +109,8 @@ export function Rankings({
             ) : (
               (row.snap_share !== null || row.red_zone_opportunities !== null || row.opponent !== null) && (
                 <div className="gl-row-stats">
+                  <span className="gl-stat gl-stat--muted gl-context-label">Player context:</span>
+                  <span className="gl-stat-sep">·</span>
                   {row.snap_share !== null && (
                     <span className="gl-stat">{(row.snap_share * 100).toFixed(0)}% snaps</span>
                   )}

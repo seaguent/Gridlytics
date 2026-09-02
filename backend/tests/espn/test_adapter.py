@@ -18,6 +18,13 @@ async def test_sync_league_persists_league_teams_matchups_and_rosters(db_session
     assert league.platform_league_id == "999888"
     assert league.season == "2026"
     assert league.name == "Test League"
+    assert league.scoring_settings == {
+        "scoring_items": [
+            {"stat_id": 3, "points": 0.05},
+            {"stat_id": 41, "points": 0.5},
+            {"stat_id": 20, "points": -1.0},
+        ]
+    }
 
     result = await db_session.execute(select(Team).where(Team.league_id == league.id))
     teams = {team.platform_roster_id: team for team in result.scalars()}

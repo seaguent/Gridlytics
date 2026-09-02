@@ -214,6 +214,16 @@ async def compute_start_sit(
     players_by_id = {player.platform_player_id: player for player in result.scalars()}
     recent_performance_by_id = await get_recent_performance_by_player(session, league, roster_player_ids)
 
+    result = await session.execute(
+        select(ProjectionRecord).where(
+            ProjectionRecord.league_id == league.id,
+            ProjectionRecord.week == league.current_week,
+            ProjectionRecord.source == "gridlytics",
+            ProjectionRecord.platform_player_id.in_(roster_player_ids),
+        )
+    )
+    native_by_id = {r.platform_player_id: r for r in result.scalars()}
+
     rows_by_id = {}
     candidates = []
     unavailable_ids = set()
@@ -225,6 +235,7 @@ async def compute_start_sit(
         position = player.position if player else (projection.position if projection else "UNKNOWN")
         name = player.name if player else (projection.name if projection else platform_player_id)
 
+        native = native_by_id.get(platform_player_id)
         row = {
             "platform_player_id": platform_player_id,
             "name": name,
@@ -237,6 +248,15 @@ async def compute_start_sit(
             "confidence": projection.confidence if projection else None,
             "range_source": projection.range_source if projection else None,
             "sample_size": projection.sample_size if projection else 0,
+            "gridlytics_projected_points": native.projected_points if native else None,
+            "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
+            "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
+            "gridlytics_dominant_category": native.dominant_category if native else None,
+            "gridlytics_lower_confidence": bool(
+                metrics is not None
+                and position == "TE"
+                and metrics.experience_status == "rookie_or_limited_history"
+            ),
             "reasons": build_explanation(projection, metrics, recent_performance_by_id.get(platform_player_id)),
             **metrics_to_dict(position, metrics),
         }
