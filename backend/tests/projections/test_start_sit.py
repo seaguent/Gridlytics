@@ -396,4 +396,112 @@ async def test_compute_start_sit_gridlytics_fields_null_when_no_native_projectio
     row = result["starters"][0]
     assert row["gridlytics_projected_points"] is None
     assert row["gridlytics_dominant_category"] is None
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_headline_projected_points_is_the_blended_final(db_session):
+    # The row's primary "projected_points" (what the optimizer maximizes and the card headline
+    # shows) must be the 50/50 blend, not the raw multi-source ensemble average and not the
+    # unblended Gridlytics base alone.
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One"))
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="espn",
+                          name="WR One", position="WR", projected_points=12.0)
+    )
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="gridlytics",
+                          name="WR One", position="WR", projected_points=15.5)
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["starters"][0]
+    assert row["gridlytics_base_projection"] == pytest.approx(15.5)
+    assert row["platform_projection"] == pytest.approx(12.0)
+    assert row["final_gridlytics_projection"] == pytest.approx(13.75)
+    assert row["projected_points"] == pytest.approx(13.75)
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_missing_platform_projection_uses_gridlytics_base_only(db_session):
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One"))
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="gridlytics",
+                          name="WR One", position="WR", projected_points=15.5)
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["starters"][0]
+    assert row["platform_projection"] is None
+    assert row["final_gridlytics_projection"] == pytest.approx(15.5)
+    assert row["projected_points"] == pytest.approx(15.5)
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_legitimate_zero_for_confirmed_unavailable_player(db_session):
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(
+        Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One", injury_status="Out")
+    )
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="espn",
+                          name="WR One", position="WR", projected_points=0.0)
+    )
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="gridlytics",
+                          name="WR One", position="WR", projected_points=15.5)
+    )
+    # Needed for NflverseMetricsProvider to include this player at all (it only considers
+    # players with real usage-stats or baseline rows) -- matches the pattern the existing
+    # unavailable-player test already relies on.
+    db_session.add(
+        PlayerUsageStats(platform="espn", platform_player_id="wr1", season="2026", week=1, target_share=0.2)
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["unavailable"][0]
+    assert row["final_gridlytics_projection"] == pytest.approx(0.0)
+    assert row["projected_points"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_compute_start_sit_suspicious_zero_without_unavailable_status_uses_base_only(db_session):
+    # Platform reports 0 but nothing confirms this player is actually out/IR/bye -- must not be
+    # averaged toward a fabricated zero.
+    league = await _make_league(db_session, "espn", current_week=1)
+    league.roster_positions = ["WR"]
+    team = await _make_team(db_session, league)
+    db_session.add(Player(platform="espn", platform_player_id="wr1", position="WR", name="WR One"))
+    db_session.add(RosterSlot(team_id=team.id, week=1, platform_player_id="wr1", is_starter=False, points=0))
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="espn",
+                          name="WR One", position="WR", projected_points=0.0)
+    )
+    db_session.add(
+        ProjectionRecord(league_id=league.id, platform_player_id="wr1", week=1, source="gridlytics",
+                          name="WR One", position="WR", projected_points=15.5)
+    )
+    await db_session.commit()
+
+    result = await compute_start_sit(db_session, league, team)
+
+    row = result["starters"][0]
+    assert row["final_gridlytics_projection"] == pytest.approx(15.5)
+    assert row["projected_points"] == pytest.approx(15.5)
     assert row["gridlytics_lower_confidence"] is False

@@ -50,7 +50,7 @@ export function Rankings({
               <span className="gl-row-record">{row.position}</span>
             </div>
             <div className="gl-row-stats">
-              <span className="gl-stat">{row.projected_points.toFixed(1)} proj</span>
+              <span className="gl-stat">{row.projected_points !== null ? row.projected_points.toFixed(1) : "n/a"} proj</span>
               <span className="gl-stat-sep">·</span>
               <span
                 className="gl-stat"
@@ -72,7 +72,7 @@ export function Rankings({
                 </>
               )}
             </div>
-            {row.gridlytics_projected_points !== null && (
+            {row.gridlytics_projected_points !== null && row.projected_points !== null && (
               <div className="gl-row-stats">
                 <span className="gl-stat">
                   Gridlytics {row.gridlytics_projected_points.toFixed(1)}{" "}

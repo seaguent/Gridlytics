@@ -77,7 +77,7 @@ export interface RankingRow {
   platform_player_id: string;
   name: string;
   position: string;
-  projected_points: number;
+  projected_points: number | null;
   sources: string[];
   value_over_replacement: number;
   value_score: number;
@@ -101,6 +101,9 @@ export interface RankingRow {
   recent_target_share: number | null;
   availability: string | null;
   gridlytics_projected_points: number | null;
+  gridlytics_base_projection: number | null;
+  platform_projection: number | null;
+  final_gridlytics_projection: number | null;
   gridlytics_expected_opportunities: number | null;
   gridlytics_prior_season_weight: number | null;
   gridlytics_dominant_category: string | null;
@@ -138,6 +141,9 @@ export interface StartSitPlayerRow {
   recent_target_share: number | null;
   availability: string | null;
   gridlytics_projected_points: number | null;
+  gridlytics_base_projection: number | null;
+  platform_projection: number | null;
+  final_gridlytics_projection: number | null;
   gridlytics_expected_opportunities: number | null;
   gridlytics_prior_season_weight: number | null;
   gridlytics_dominant_category: string | null;

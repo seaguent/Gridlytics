@@ -350,6 +350,60 @@ def test_rankings_does_not_label_a_defense_as_rookie_for_lacking_usage_stats(cli
 
 
 @respx.mock
+def test_rankings_projected_points_is_the_blended_final_gridlytics_projection(client, test_engine):
+    import copy
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.models import League, ProjectionRecord
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+
+    raw = copy.deepcopy(SAMPLE_RAW)
+    starter_qb = raw["teams"][0]["roster"]["entries"][0]
+    starter_qb["playerPoolEntry"]["player"]["stats"] = [
+        {"scoringPeriodId": 3, "statSourceId": 1, "appliedTotal": 12.0}
+    ]
+
+    connect_response = client.post(
+        "/connections/espn",
+        json={"raw_league_data": raw, "access_token_hash": hash_token("blend-test-token")},
+    )
+    assert connect_response.status_code == 200
+
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    async def _seed_gridlytics_projection():
+        async with session_factory() as session:
+            result = await session.execute(select(League))
+            league = result.scalars().one()
+            session.add(
+                ProjectionRecord(
+                    league_id=league.id, platform_player_id="111", week=league.current_week,
+                    source="gridlytics", name="QB Starter", position="QB", projected_points=16.0,
+                )
+            )
+            await session.commit()
+
+    import asyncio
+    asyncio.run(_seed_gridlytics_projection())
+
+    rankings_response = client.get(
+        "/leagues/me/rankings", headers={"Authorization": "Bearer blend-test-token"}
+    )
+    assert rankings_response.status_code == 200
+    rows = {row["platform_player_id"]: row for row in rankings_response.json()}
+
+    row = rows["111"]
+    assert row["gridlytics_base_projection"] == pytest.approx(16.0)
+    assert row["platform_projection"] == pytest.approx(12.0)
+    assert row["final_gridlytics_projection"] == pytest.approx(14.0)
+    assert row["projected_points"] == pytest.approx(14.0)
+
+
+@respx.mock
 def test_espn_connection_and_resync_flow(client):
     from tests.espn.test_parser import SAMPLE_RAW
 

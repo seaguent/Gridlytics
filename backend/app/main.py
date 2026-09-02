@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
@@ -28,6 +29,7 @@ from app.nflverse.sync import sync_usage_stats
 from app.projections.accuracy_pipeline import load_projection_accuracy
 from app.projections.ensemble import EnsembleProjectionProvider
 from app.projections.espn import ESPNProjectionProvider
+from app.projections.final_projection import compute_final_projection, fetch_platform_only_projections
 from app.projections.historical import HistoricalAverageProjectionProvider
 from app.projections.nflverse_metrics import NflverseMetricsProvider
 from app.projections.rows import metrics_to_dict
@@ -370,14 +372,6 @@ async def get_rankings(
         return []
     projections = await apply_uncertainty_ranges(session, league, projections)
 
-    result = await session.execute(select(Team).where(Team.league_id == league.id))
-    num_teams = len(result.scalars().all())
-
-    vor = compute_value_over_replacement(projections, league.roster_positions, num_teams)
-    vor_values = list(vor.values())
-    vor_min, vor_max = min(vor_values), max(vor_values)
-    vor_range = vor_max - vor_min
-
     metrics_by_player = {
         m.platform_player_id: m for m in await NflverseMetricsProvider().get_metrics(session, league)
     }
@@ -391,6 +385,33 @@ async def get_rankings(
         )
     )
     native_by_player = {r.platform_player_id: r for r in result.scalars()}
+    platform_projection_by_player = await fetch_platform_only_projections(session, league)
+
+    # The final blended Gridlytics projection (context-aware base x platform, per
+    # compute_final_projection's zero-handling rules) is what drives ranking/VOR going forward
+    # -- not the raw multi-source ensemble average, and not the unblended Gridlytics base alone.
+    final_projections = [
+        replace(
+            p,
+            projected_points=compute_final_projection(
+                gridlytics_base=native_by_player[p.platform_player_id].projected_points
+                if p.platform_player_id in native_by_player else None,
+                platform_projection=platform_projection_by_player.get(p.platform_player_id),
+                availability_status=metrics_by_player[p.platform_player_id].availability
+                if p.platform_player_id in metrics_by_player else None,
+            ),
+        )
+        for p in projections
+    ]
+    final_by_player = {p.platform_player_id: p.projected_points for p in final_projections}
+
+    result = await session.execute(select(Team).where(Team.league_id == league.id))
+    num_teams = len(result.scalars().all())
+
+    vor = compute_value_over_replacement(final_projections, league.roster_positions, num_teams)
+    vor_values = list(vor.values())
+    vor_min, vor_max = min(vor_values), max(vor_values)
+    vor_range = vor_max - vor_min
 
     rows = []
     for p in projections:
@@ -403,7 +424,7 @@ async def get_rankings(
                 "platform_player_id": p.platform_player_id,
                 "name": p.name,
                 "position": p.position,
-                "projected_points": p.projected_points,
+                "projected_points": final_by_player.get(p.platform_player_id),
                 "sources": p.sources,
                 "value_over_replacement": player_vor,
                 "value_score": value_score,
@@ -412,6 +433,12 @@ async def get_rankings(
                 "confidence": p.confidence,
                 "range_source": p.range_source,
                 "sample_size": p.sample_size,
+                "gridlytics_base_projection": native.projected_points if native else None,
+                "platform_projection": platform_projection_by_player.get(p.platform_player_id),
+                "final_gridlytics_projection": final_by_player.get(p.platform_player_id),
+                # Kept exactly as before (our own raw model number, null when we have none) --
+                # this field predates the blend and is a distinct explainability value from
+                # final_gridlytics_projection, not an alias for it.
                 "gridlytics_projected_points": native.projected_points if native else None,
                 "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
                 "gridlytics_prior_season_weight": native.prior_season_weight if native else None,

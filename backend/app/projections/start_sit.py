@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,6 +8,7 @@ from app.analytics.roster import NON_STARTING_SLOTS
 from app.models import League, Player, ProjectionRecord, RosterSlot, Team
 from app.projections.ensemble import EnsembleProjectionProvider
 from app.projections.espn import ESPNProjectionProvider
+from app.projections.final_projection import compute_final_projection, fetch_platform_only_projections
 from app.projections.head_to_head import compare_players
 from app.projections.historical import HistoricalAverageProjectionProvider
 from app.projections.models import PlayerMetrics, PlayerProjection
@@ -223,8 +226,10 @@ async def compute_start_sit(
         )
     )
     native_by_id = {r.platform_player_id: r for r in result.scalars()}
+    platform_projection_by_id = await fetch_platform_only_projections(session, league)
 
     rows_by_id = {}
+    blended_projections_by_id = {}
     candidates = []
     unavailable_ids = set()
 
@@ -236,18 +241,39 @@ async def compute_start_sit(
         name = player.name if player else (projection.name if projection else platform_player_id)
 
         native = native_by_id.get(platform_player_id)
+        platform_projection = platform_projection_by_id.get(platform_player_id)
+        # The final blended Gridlytics projection (context-aware base x platform, per
+        # compute_final_projection's zero-handling rules) drives the optimizer and the row's
+        # headline number -- not the raw multi-source ensemble average.
+        final_projection = compute_final_projection(
+            gridlytics_base=native.projected_points if native else None,
+            platform_projection=platform_projection,
+            availability_status=metrics.availability if metrics else None,
+        )
+        # Same number the row/optimizer use, so the explanation text ("Projected X points")
+        # never contradicts the headline figure -- floor/ceiling stay from the original
+        # multi-source ensemble range, unchanged.
+        explanation_projection = replace(projection, projected_points=final_projection) if projection else None
+        blended_projections_by_id[platform_player_id] = explanation_projection
+
         row = {
             "platform_player_id": platform_player_id,
             "name": name,
             "position": position,
             "currently_starting": roster.get(platform_player_id, False),
-            "projected_points": projection.projected_points if projection else None,
+            "projected_points": final_projection,
             "sources": projection.sources if projection else [],
             "floor": projection.floor if projection else None,
             "ceiling": projection.ceiling if projection else None,
             "confidence": projection.confidence if projection else None,
             "range_source": projection.range_source if projection else None,
             "sample_size": projection.sample_size if projection else 0,
+            "gridlytics_base_projection": native.projected_points if native else None,
+            "platform_projection": platform_projection,
+            "final_gridlytics_projection": final_projection,
+            # Kept exactly as before (our own raw model number, null when we have none) -- this
+            # field predates the blend and is a distinct explainability value from
+            # final_gridlytics_projection, not an alias for it.
             "gridlytics_projected_points": native.projected_points if native else None,
             "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
             "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
@@ -257,7 +283,9 @@ async def compute_start_sit(
                 and position == "TE"
                 and metrics.experience_status == "rookie_or_limited_history"
             ),
-            "reasons": build_explanation(projection, metrics, recent_performance_by_id.get(platform_player_id)),
+            "reasons": build_explanation(
+                explanation_projection, metrics, recent_performance_by_id.get(platform_player_id)
+            ),
             **metrics_to_dict(position, metrics),
         }
         rows_by_id[platform_player_id] = row
@@ -265,8 +293,8 @@ async def compute_start_sit(
         is_unavailable = metrics is not None and metrics.availability == "unavailable"
         if is_unavailable:
             unavailable_ids.add(platform_player_id)
-        elif projection is not None:
-            candidates.append({"player_id": platform_player_id, "position": position, "points": projection.projected_points})
+        elif final_projection is not None:
+            candidates.append({"player_id": platform_player_id, "position": position, "points": final_projection})
 
     starting_slots = [slot for slot in league.roster_positions if slot not in NON_STARTING_SLOTS]
     assignment, optimal_points = find_optimal_lineup(candidates, starting_slots)
@@ -298,17 +326,19 @@ async def compute_start_sit(
         starter_id = starter_row["platform_player_id"]
         eligible_positions = SLOT_ELIGIBILITY.get(starter_row["recommended_slot"], set())
         partner = next((row for row in unpaired_swap_outs if row["position"] in eligible_positions), None)
-        if partner is None or starter_id not in projections_by_id:
+        if partner is None or blended_projections_by_id.get(starter_id) is None:
             continue
         partner_id = partner["platform_player_id"]
         unpaired_swap_outs.remove(partner)
         starter_row["swap_out_player_id"] = partner_id
         starter_row["swap_out_name"] = partner["name"]
-        if partner_id in projections_by_id:
+        if blended_projections_by_id.get(partner_id) is not None:
+            # Same blended final projection the row cards/optimizer use -- keeps the head-to-head
+            # "+Z pts" gap from contradicting the headline numbers shown elsewhere.
             starter_row["comparison"] = compare_players(
-                projections_by_id[starter_id],
+                blended_projections_by_id[starter_id],
                 metrics_by_id.get(starter_id),
-                projections_by_id[partner_id],
+                blended_projections_by_id[partner_id],
                 metrics_by_id.get(partner_id),
             )
 
