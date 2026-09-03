@@ -36,7 +36,9 @@ from app.projections.rows import metrics_to_dict
 from app.projections.sleeper import SleeperProjectionProvider
 from app.projections.start_sit import compute_start_sit
 from app.projections.uncertainty_pipeline import apply_uncertainty_ranges
+from app.projections.available_players import EspnAuthError
 from app.projections.value import compute_value_over_replacement
+from app.projections.waivers import compute_waiver_recommendations
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
 from app.sleeper.scoring import detect_custom_scoring
@@ -467,6 +469,36 @@ async def get_start_sit(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await compute_start_sit(session, league, team)
+
+
+@app.get("/leagues/me/waivers")
+async def get_waivers(
+    league: League = Depends(get_fresh_league),
+    connection: LeagueConnection = Depends(get_current_connection),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if league.platform == "espn":
+        # ESPN has no server-side auth -- free-agent data can only arrive via POST with a
+        # browser-fetched payload (see post_waivers below), never through a bare GET.
+        return {"mode": "unsupported_platform", "recommendations": []}
+    return await compute_waiver_recommendations(session, league, connection)
+
+
+class WaiversRequest(BaseModel):
+    raw_free_agents_data: dict | None = None
+
+
+@app.post("/leagues/me/waivers")
+async def post_waivers(
+    body: WaiversRequest,
+    league: League = Depends(get_fresh_league),
+    connection: LeagueConnection = Depends(get_current_connection),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        return await compute_waiver_recommendations(session, league, connection, body.raw_free_agents_data)
+    except EspnAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/leagues/me/projection-accuracy")

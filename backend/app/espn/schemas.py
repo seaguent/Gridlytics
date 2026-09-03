@@ -141,3 +141,17 @@ class EspnLeagueResponse(BaseModel):
     teams: list[EspnTeam] = []
     schedule: list[EspnScheduleEntry] = []
     members: list[EspnMember] = []
+
+
+class EspnFreeAgentEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    onTeamId: int = 0
+    player: EspnPlayer = EspnPlayer()
+
+
+class EspnFreeAgentResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    players: list[EspnFreeAgentEntry] = []

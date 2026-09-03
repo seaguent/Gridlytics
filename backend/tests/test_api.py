@@ -411,6 +411,93 @@ def test_rankings_platform_projection_stays_untouched_while_gridlytics_shows_the
 
 
 @respx.mock
+def test_waivers_endpoint_returns_unsupported_for_espn_league(client):
+    import copy
+
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+    raw = copy.deepcopy(SAMPLE_RAW)
+
+    connect_response = client.post(
+        "/connections/espn", json={"raw_league_data": raw, "access_token_hash": hash_token("waiver-token")},
+    )
+    assert connect_response.status_code == 200
+
+    response = client.get("/leagues/me/waivers", headers={"Authorization": "Bearer waiver-token"})
+    assert response.status_code == 200
+    assert response.json() == {"mode": "unsupported_platform", "recommendations": []}
+
+
+@respx.mock
+def test_espn_waivers_endpoint_returns_recommendations_via_post(client):
+    from tests.espn.test_parser import SAMPLE_RAW
+    from tests.projections.test_waivers import _mock_empty_nflverse_history
+
+    _mock_empty_nflverse_history("2026")
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/players/players.csv").mock(
+        return_value=httpx.Response(200, text="gsis_id,display_name,espn_id,pfr_id,position\n")
+    )
+
+    connect_response = client.post(
+        "/connections/espn",
+        json={"raw_league_data": SAMPLE_RAW, "access_token_hash": hash_token("espn-waiver-token")},
+    )
+    assert connect_response.status_code == 200
+
+    raw_free_agents_data = {
+        "players": [
+            {
+                "id": 999,
+                "onTeamId": 0,
+                "player": {
+                    "fullName": "Waiver WR",
+                    "defaultPositionId": 3,
+                    "proTeamId": 12,
+                    "injuryStatus": None,
+                    "stats": [{"scoringPeriodId": 3, "statSourceId": 1, "appliedTotal": 12.0}],
+                },
+            }
+        ]
+    }
+    response = client.post(
+        "/leagues/me/waivers",
+        json={"raw_free_agents_data": raw_free_agents_data},
+        headers={"Authorization": "Bearer espn-waiver-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "projection_only"
+    assert len(body["recommendations"]) == 1
+    row = body["recommendations"][0]
+    assert row["platform_player_id"] == "999"
+    assert row["name"] == "Waiver WR"
+    assert row["platform_projection"] == pytest.approx(12.0)
+
+
+@respx.mock
+def test_espn_waivers_endpoint_returns_400_when_raw_data_missing(client):
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+
+    connect_response = client.post(
+        "/connections/espn",
+        json={"raw_league_data": SAMPLE_RAW, "access_token_hash": hash_token("espn-waiver-auth-fail-token")},
+    )
+    assert connect_response.status_code == 200
+
+    response = client.post(
+        "/leagues/me/waivers",
+        json={},
+        headers={"Authorization": "Bearer espn-waiver-auth-fail-token"},
+    )
+
+    assert response.status_code == 400
+
+
+@respx.mock
 def test_espn_connection_and_resync_flow(client):
     from tests.espn.test_parser import SAMPLE_RAW
 

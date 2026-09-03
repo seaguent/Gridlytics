@@ -1,4 +1,4 @@
-from app.espn.schemas import EspnLeagueResponse
+from app.espn.schemas import EspnFreeAgentResponse, EspnLeagueResponse
 
 POSITION_ID_MAP = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF"}
 
@@ -171,6 +171,42 @@ def parse_projections(raw: EspnLeagueResponse) -> list[dict]:
 
 
 ACTUAL_STAT_SOURCE_ID = 0
+
+
+def parse_free_agents(raw: EspnFreeAgentResponse, current_period: int) -> list[dict]:
+    seen_player_ids: set[str] = set()
+    free_agents = []
+
+    for entry in raw.players:
+        if entry.onTeamId:
+            continue
+        platform_player_id = str(entry.id)
+        if platform_player_id in seen_player_ids:
+            continue
+        seen_player_ids.add(platform_player_id)
+
+        player = entry.player
+        projected_stat = next(
+            (
+                stat
+                for stat in player.stats
+                if stat.statSourceId == PROJECTED_STAT_SOURCE_ID
+                and stat.scoringPeriodId == current_period
+                and stat.appliedTotal is not None
+            ),
+            None,
+        )
+        free_agents.append(
+            {
+                "platform_player_id": platform_player_id,
+                "name": player.fullName or f"Player {entry.id}",
+                "position": POSITION_ID_MAP.get(player.defaultPositionId, "UNKNOWN"),
+                "team": PRO_TEAM_ID_MAP.get(player.proTeamId),
+                "injury_status": player.injuryStatus,
+                "projected_points": projected_stat.appliedTotal if projected_stat else None,
+            }
+        )
+    return free_agents
 
 
 def parse_actual_scores(raw: EspnLeagueResponse) -> list[dict]:

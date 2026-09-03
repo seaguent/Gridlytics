@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import overlayStyles from "../overlay.css";
 import {
+  fetchEspnWaivers,
   fetchLeagueInfo,
   fetchProjectionAccuracy,
   fetchRankings,
   fetchStartSit,
+  fetchWaivers,
   fetchWeeklyRecap,
   LeagueInfo,
   ProjectionAccuracy,
   RankingRow,
   setMyTeam,
   StartSitResponse,
+  WaiverResponse,
   WeeklyRecap,
 } from "../api";
 import { useAnalytics } from "../hooks/useAnalytics";
@@ -22,6 +25,7 @@ import { Recap } from "./Recap";
 import { Standings } from "./Standings";
 import { StartSit } from "./StartSit";
 import { TeamPicker } from "./TeamPicker";
+import { Waivers } from "./Waivers";
 
 export type OverlayLeague =
   | { platform: "sleeper"; leagueId: string }
@@ -32,7 +36,7 @@ function formatSubtitle(info: LeagueInfo): string {
   return `${info.name} · ${period}`;
 }
 
-type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings" | "startSit";
+type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings" | "startSit" | "waivers";
 
 interface ConnectResponse {
   ok: boolean;
@@ -70,6 +74,9 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   const [startSit, setStartSit] = useState<StartSitResponse | null>(null);
   const [startSitError, setStartSitError] = useState<string | null>(null);
   const [settingTeam, setSettingTeam] = useState(false);
+
+  const [waivers, setWaivers] = useState<WaiverResponse | null>(null);
+  const [waiversError, setWaiversError] = useState<string | null>(null);
 
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -127,6 +134,22 @@ export function Overlay({ league }: { league: OverlayLeague }) {
       .then(setStartSit)
       .catch((err: Error) => setStartSitError(err.message));
   }, [token, tab, leagueInfo?.my_team_id, refreshKey]);
+
+  useEffect(() => {
+    if (!token || tab !== "waivers") return;
+    if (league.platform === "espn") {
+      if (!leagueInfo) return;
+      setWaiversError(null);
+      fetchEspnWaivers(token, league.leagueId, league.season, leagueInfo.current_week)
+        .then(setWaivers)
+        .catch((err: Error) => setWaiversError(err.message));
+      return;
+    }
+    setWaiversError(null);
+    fetchWaivers(token)
+      .then(setWaivers)
+      .catch((err: Error) => setWaiversError(err.message));
+  }, [token, tab, refreshKey, league, leagueInfo?.current_week]);
 
   const { standings, powerRankings, playoffOdds, efficiency, error } = useAnalytics(token, refreshKey);
 
@@ -270,18 +293,24 @@ export function Overlay({ league }: { league: OverlayLeague }) {
               >
                 Start/Sit
               </button>
+              <button
+                className={tab === "waivers" ? "gl-tab gl-tab--active" : "gl-tab"}
+                onClick={() => setTab("waivers")}
+              >
+                Waivers
+              </button>
             </div>
 
             {connectError && <div className="gl-error">{connectError}</div>}
 
             <div className="gl-body">
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && error && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && error && (
                 <div className="gl-error">{error}</div>
               )}
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && !error && !dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && !error && !dataReady && (
                 <div className="gl-loading">Loading...</div>
               )}
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && dataReady && (
                 <>
                   {tab === "standings" && <Standings rows={standings} />}
                   {tab === "power" && <PowerRankings rows={powerRankings} />}
@@ -360,6 +389,13 @@ export function Overlay({ league }: { league: OverlayLeague }) {
                       {startSit && <StartSit data={startSit} />}
                     </>
                   )}
+                </>
+              )}
+
+              {tab === "waivers" && (
+                <>
+                  {waiversError && <div className="gl-error">{waiversError}</div>}
+                  {!waiversError && <Waivers data={waivers} />}
                 </>
               )}
             </div>

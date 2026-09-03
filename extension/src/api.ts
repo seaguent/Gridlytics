@@ -181,6 +181,26 @@ export interface StartSitResponse {
   summary: StartSitSummary;
 }
 
+export interface WaiverRow {
+  platform_player_id: string;
+  name: string;
+  position: string;
+  team: string | null;
+  projected_lineup_improvement: number | null;
+  replaces_player_id: string | null;
+  replaces_name: string | null;
+  gridlytics_base_projection: number | null;
+  platform_projection: number | null;
+  final_gridlytics_projection: number | null;
+  value_over_replacement: number | null;
+  reasons: string[];
+}
+
+export interface WaiverResponse {
+  mode: "lineup_comparison" | "projection_only" | "unsupported_platform";
+  recommendations: WaiverRow[];
+}
+
 export interface SourceAccuracy {
   source: string;
   mae: number;
@@ -264,4 +284,28 @@ export function fetchStartSit(token: string): Promise<StartSitResponse> {
 
 export function fetchProjectionAccuracy(token: string): Promise<ProjectionAccuracy> {
   return fetchJson("/leagues/me/projection-accuracy", token);
+}
+
+export function fetchWaivers(token: string): Promise<WaiverResponse> {
+  return fetchJson("/leagues/me/waivers", token);
+}
+
+export async function fetchEspnWaivers(
+  token: string,
+  leagueId: string,
+  season: string,
+  week: number
+): Promise<WaiverResponse> {
+  const response = (await chrome.runtime.sendMessage({
+    type: "FETCH_ESPN_WAIVERS",
+    leagueId,
+    season,
+    week,
+    token,
+  })) as ApiGetResponse<WaiverResponse>;
+
+  if (!response.ok) {
+    throw new Error(response.error ?? "Request to /leagues/me/waivers failed");
+  }
+  return response.data as WaiverResponse;
 }

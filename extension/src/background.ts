@@ -22,6 +22,14 @@ interface ResyncEspnLeagueMessage {
   token: string;
 }
 
+interface FetchEspnWaiversMessage {
+  type: "FETCH_ESPN_WAIVERS";
+  leagueId: string;
+  season: string;
+  week: number;
+  token: string;
+}
+
 interface ApiGetMessage {
   type: "API_GET";
   path: string;
@@ -39,6 +47,7 @@ type Message =
   | ConnectLeagueMessage
   | ConnectEspnLeagueMessage
   | ResyncEspnLeagueMessage
+  | FetchEspnWaiversMessage
   | ApiGetMessage
   | ApiPostMessage;
 
@@ -131,6 +140,40 @@ async function resyncEspnLeague(
   return { ok: true };
 }
 
+async function fetchEspnFreeAgents(leagueId: string, season: string, week: number): Promise<unknown> {
+  const filter = {
+    players: {
+      filterStatus: { value: ["FREEAGENT", "WAIVERS"] },
+      limit: 300,
+      sortPercOwned: { sortPriority: 1, sortAsc: false },
+    },
+  };
+  const url = `${ESPN_API_BASE}/seasons/${season}/segments/0/leagues/${leagueId}?view=kona_player_info&scoringPeriodId=${week}`;
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: { "X-Fantasy-Filter": JSON.stringify(filter) },
+  });
+  if (!response.ok) {
+    throw new Error(`ESPN returned ${response.status} -- is this league private and you're not logged in?`);
+  }
+  return response.json();
+}
+
+async function fetchEspnWaivers(
+  leagueId: string,
+  season: string,
+  week: number,
+  token: string
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  let rawFreeAgentsData: unknown;
+  try {
+    rawFreeAgentsData = await fetchEspnFreeAgents(leagueId, season, week);
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+  return apiPost("/leagues/me/waivers", token, { raw_free_agents_data: rawFreeAgentsData });
+}
+
 async function apiGet(
   path: string,
   token: string
@@ -175,6 +218,11 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
   if (message.type === "RESYNC_ESPN_LEAGUE") {
     resyncEspnLeague(message.leagueId, message.season, message.token).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "FETCH_ESPN_WAIVERS") {
+    fetchEspnWaivers(message.leagueId, message.season, message.week, message.token).then(sendResponse);
     return true;
   }
 
