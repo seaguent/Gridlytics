@@ -59,21 +59,41 @@ function PlayerChecklist({
   );
 }
 
-function DeltaCard({ label, result }: { label: string; result: TradeAnalysisResponse["your_team"] }) {
+function DeltaCard({
+  label,
+  result,
+  weeksRemaining,
+}: {
+  label: string;
+  result: TradeAnalysisResponse["your_team"];
+  weeksRemaining: number;
+}) {
+  const weekWord = weeksRemaining === 1 ? "week" : "weeks";
   return (
     <div className="gl-row">
       <div className="gl-row-main">
         <span className="gl-row-name">{label}</span>
         <span className="gl-stat">
-          {result.delta >= 0 ? "+" : ""}
-          {result.delta.toFixed(1)} pts
+          {result.rest_of_season_delta >= 0 ? "+" : ""}
+          {result.rest_of_season_delta.toFixed(1)} pts / {weeksRemaining} {weekWord}
         </span>
       </div>
       <div className="gl-row-stats">
         <span className="gl-stat">
-          {result.current_points.toFixed(1)} → {result.projected_points.toFixed(1)}
+          {result.rest_of_season_before.toFixed(1)} → {result.rest_of_season_after.toFixed(1)}
         </span>
       </div>
+      <div className="gl-row-stats gl-stat--muted">
+        This week: {result.current_week_delta >= 0 ? "+" : ""}
+        {result.current_week_delta.toFixed(1)} ({result.current_week_before.toFixed(1)} →{" "}
+        {result.current_week_after.toFixed(1)})
+      </div>
+      {Math.abs(result.actual_current_starters_points - result.current_week_before) > 0.05 && (
+        <div className="gl-row-stats gl-stat--muted">
+          Actual current lineup: {result.actual_current_starters_points.toFixed(1)} pts (not the optimal{" "}
+          {result.current_week_before.toFixed(1)} used above -- unrelated to this trade)
+        </div>
+      )}
       {result.reasons.length > 0 && (
         <div className="gl-row-stats gl-stat--muted">{result.reasons.join(" · ")}</div>
       )}
@@ -188,8 +208,8 @@ export function Trades({
 
       {result && (
         <div className="gl-list gl-trade-results">
-          <DeltaCard label="Your team" result={result.your_team} />
-          <DeltaCard label="Their team" result={result.other_team} />
+          <DeltaCard label="Your team" result={result.your_team} weeksRemaining={result.weeks_remaining} />
+          <DeltaCard label="Their team" result={result.other_team} weeksRemaining={result.weeks_remaining} />
         </div>
       )}
     </div>

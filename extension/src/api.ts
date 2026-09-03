@@ -202,13 +202,18 @@ export interface WaiverResponse {
 }
 
 export interface TradeSideResult {
-  current_points: number;
-  projected_points: number;
-  delta: number;
+  current_week_before: number;
+  current_week_after: number;
+  current_week_delta: number;
+  rest_of_season_before: number;
+  rest_of_season_after: number;
+  rest_of_season_delta: number;
+  actual_current_starters_points: number;
   reasons: string[];
 }
 
 export interface TradeAnalysisResponse {
+  weeks_remaining: number;
   your_team: TradeSideResult;
   other_team: TradeSideResult;
 }

@@ -160,8 +160,17 @@ describe("fetchTradeAnalysis", () => {
 
   it("resolves with the data from a successful API_POST response", async () => {
     const data = {
-      your_team: { current_points: 3.0, projected_points: 18.0, delta: 15.0, reasons: [] },
-      other_team: { current_points: 18.0, projected_points: 3.0, delta: -15.0, reasons: [] },
+      weeks_remaining: 11,
+      your_team: {
+        current_week_before: 3.0, current_week_after: 18.0, current_week_delta: 15.0,
+        rest_of_season_before: 40.0, rest_of_season_after: 58.4, rest_of_season_delta: 18.4,
+        actual_current_starters_points: 3.0, reasons: [],
+      },
+      other_team: {
+        current_week_before: 18.0, current_week_after: 3.0, current_week_delta: -15.0,
+        rest_of_season_before: 58.4, rest_of_season_after: 40.0, rest_of_season_delta: -18.4,
+        actual_current_starters_points: 18.0, reasons: [],
+      },
     };
     vi.stubGlobal("chrome", {
       runtime: { sendMessage: vi.fn().mockResolvedValue({ ok: true, data }) },
@@ -171,12 +180,14 @@ describe("fetchTradeAnalysis", () => {
   });
 
   it("sends the trade payload and token in the message to the background script", async () => {
+    const sideResult = {
+      current_week_before: 0, current_week_after: 0, current_week_delta: 0,
+      rest_of_season_before: 0, rest_of_season_after: 0, rest_of_season_delta: 0,
+      actual_current_starters_points: 0, reasons: [],
+    };
     const sendMessage = vi.fn().mockResolvedValue({
       ok: true,
-      data: {
-        your_team: { current_points: 0, projected_points: 0, delta: 0, reasons: [] },
-        other_team: { current_points: 0, projected_points: 0, delta: 0, reasons: [] },
-      },
+      data: { weeks_remaining: 0, your_team: sideResult, other_team: sideResult },
     });
     vi.stubGlobal("chrome", { runtime: { sendMessage } });
 

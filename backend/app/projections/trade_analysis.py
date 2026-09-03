@@ -1,9 +1,12 @@
+import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.lineup import find_optimal_lineup
 from app.analytics.roster import NON_STARTING_SLOTS
 from app.models import League, Player, ProjectionRecord, RosterSlot, Team
+from app.nflverse.client import NflverseClient
+from app.projections.availability import classify_availability
 from app.projections.final_projection import compute_final_projection
 from app.projections.models import PlayerProjection
 from app.projections.native.categories import POSITION_CATEGORIES
@@ -26,9 +29,20 @@ class InvalidTradeError(Exception):
     pass
 
 
-async def _load_roster_candidates(
+def _teams_playing_by_week(schedule: pd.DataFrame, weeks: list[int]) -> dict[int, set[str]]:
+    result: dict[int, set[str]] = {}
+    for week in weeks:
+        week_games = schedule[schedule["week"] == week]
+        result[week] = set(week_games["home_team"]) | set(week_games["away_team"])
+    return result
+
+
+async def _load_roster_players(
     session: AsyncSession, league: League, team_id: int
 ) -> tuple[list[dict], dict[str, str], set[str]]:
+    """Raw per-player ingredients for a roster -- deliberately NOT blended/finalized here, so the
+    caller can apply real current-week availability for the current-week term of the ROS sum and
+    neutral (matchup-agnostic) availability for every future-week term."""
     result = await session.execute(
         select(RosterSlot.platform_player_id, RosterSlot.is_starter).where(
             RosterSlot.team_id == team_id, RosterSlot.week == league.current_week
@@ -59,24 +73,64 @@ async def _load_roster_candidates(
     )
     gridlytics_base = {r.platform_player_id: r.projected_points for r in result.scalars()}
 
-    candidates: list[dict] = []
+    players: list[dict] = []
     names_by_id: dict[str, str] = {}
     for pid in player_ids:
         player = players_by_id.get(pid)
         if player is None or player.position not in POSITION_CATEGORIES:
             continue
-        final = compute_final_projection(gridlytics_base.get(pid), platform_projection.get(pid), None)
-        if final is None:
-            continue
-        candidates.append({"player_id": pid, "position": player.position, "points": final})
+        players.append({
+            "player_id": pid,
+            "position": player.position,
+            "team": player.team,
+            "injury_status": player.injury_status,
+            "gridlytics_base": gridlytics_base.get(pid),
+            "platform_projection": platform_projection.get(pid),
+        })
         names_by_id[pid] = player.name
-    return candidates, names_by_id, starting_ids
+    return players, names_by_id, starting_ids
+
+
+def _current_week_candidates(players: list[dict], playing_teams: set[str]) -> list[dict]:
+    """Blended projection, real current-week availability (injury + this-week bye)."""
+    candidates = []
+    for p in players:
+        is_bye = bool(playing_teams) and p["team"] not in playing_teams
+        availability = classify_availability(p["injury_status"], is_bye)
+        points = compute_final_projection(p["gridlytics_base"], p["platform_projection"], availability)
+        if points is None:
+            continue
+        candidates.append({"player_id": p["player_id"], "position": p["position"], "team": p["team"], "points": points})
+    return candidates
+
+
+def _neutral_candidates(players: list[dict]) -> list[dict]:
+    """The matchup-neutral Gridlytics base rate, assuming normal availability -- used for every
+    future week. Excludes a player only when there's no real base rate to carry forward at all
+    (missing != zero), never a fabricated fallback to the current-week blended number."""
+    candidates = []
+    for p in players:
+        if p["gridlytics_base"] is None:
+            continue
+        candidates.append(
+            {"player_id": p["player_id"], "position": p["position"], "team": p["team"], "points": p["gridlytics_base"]}
+        )
+    return candidates
+
+
+def _exclude_bye(candidates: list[dict], playing_teams: set[str]) -> list[dict]:
+    if not playing_teams:
+        # No schedule data for this week -- unknown is not the same as everyone being on bye.
+        return candidates
+    return [c for c in candidates if c["team"] in playing_teams]
 
 
 def _reasons_for(pids: list[str], candidates_by_id: dict[str, dict], names_by_id: dict[str, str]) -> list[str]:
     reasons: list[str] = []
     for pid in pids:
-        candidate = candidates_by_id[pid]
+        candidate = candidates_by_id.get(pid)
+        if candidate is None:
+            continue
         projection = PlayerProjection(
             platform_player_id=pid, name=names_by_id.get(pid, pid), position=candidate["position"],
             projected_points=candidate["points"], sources=[],
@@ -102,10 +156,10 @@ async def compute_trade_analysis(
     if result.scalar_one_or_none() is None:
         raise InvalidTradeError("That team is not in this league")
 
-    my_candidates, my_names, my_starting_ids = await _load_roster_candidates(session, league, my_team_id)
-    other_candidates, other_names, other_starting_ids = await _load_roster_candidates(session, league, other_team_id)
-    my_ids = {c["player_id"] for c in my_candidates}
-    other_ids = {c["player_id"] for c in other_candidates}
+    my_players, my_names, my_starting_ids = await _load_roster_players(session, league, my_team_id)
+    other_players, other_names, other_starting_ids = await _load_roster_players(session, league, other_team_id)
+    my_ids = {p["player_id"] for p in my_players}
+    other_ids = {p["player_id"] for p in other_players}
 
     for pid in give_player_ids:
         if pid not in my_ids:
@@ -114,32 +168,96 @@ async def compute_trade_analysis(
         if pid not in other_ids:
             raise InvalidTradeError(f"{pid} is not on that team's roster")
 
+    nflverse_client = NflverseClient()
+    try:
+        schedule = await nflverse_client.get_schedule(league.season)
+    finally:
+        await nflverse_client.aclose()
+
+    weeks = list(range(league.current_week, league.playoff_week_start)) or [league.current_week]
+    current_week = weeks[0]
+    future_weeks = weeks[1:]
+    teams_playing_by_week = _teams_playing_by_week(schedule, weeks)
+
     starting_slots = [slot for slot in league.roster_positions if slot not in NON_STARTING_SLOTS]
     give_set = set(give_player_ids)
     receive_set = set(receive_player_ids)
-    my_by_id = {c["player_id"]: c for c in my_candidates}
-    other_by_id = {c["player_id"]: c for c in other_candidates}
-    receive_candidates = [other_by_id[pid] for pid in receive_player_ids]
-    give_candidates = [my_by_id[pid] for pid in give_player_ids]
 
-    # "current" matches Start/Sit's own current_lineup_points exactly: the real, actually-started
-    # players (RosterSlot.is_starter), not the mathematically-optimal lineup -- those two only
-    # coincide when the manager's real lineup already happens to be optimal.
-    your_current = sum(c["points"] for c in my_candidates if c["player_id"] in my_starting_ids)
-    their_current = sum(c["points"] for c in other_candidates if c["player_id"] in other_starting_ids)
+    # --- Current week: blended projection, real current-week availability ---
+    current_playing_teams = teams_playing_by_week.get(current_week, set())
+    my_current = _current_week_candidates(my_players, current_playing_teams)
+    other_current = _current_week_candidates(other_players, current_playing_teams)
+    my_current_by_id = {c["player_id"]: c for c in my_current}
+    other_current_by_id = {c["player_id"]: c for c in other_current}
+    receive_current = [other_current_by_id[pid] for pid in receive_player_ids if pid in other_current_by_id]
+    give_current = [my_current_by_id[pid] for pid in give_player_ids if pid in my_current_by_id]
 
-    _, your_projected = simulate_trade(my_candidates, starting_slots, give_set, receive_candidates)
-    _, their_projected = simulate_trade(other_candidates, starting_slots, receive_set, give_candidates)
+    # Both before and after use the OPTIMAL lineup -- an existing lineup-setting mistake (the
+    # manager benching their best player) is a real, separate problem Start/Sit already surfaces,
+    # but it must never leak into the trade delta, which has to isolate the trade's own value.
+    your_actual_current_starters_points = sum(
+        c["points"] for c in my_current if c["player_id"] in my_starting_ids
+    )
+    their_actual_current_starters_points = sum(
+        c["points"] for c in other_current if c["player_id"] in other_starting_ids
+    )
+    your_current_week_before, your_current_week_after = simulate_trade(
+        my_current, starting_slots, give_set, receive_current
+    )
+    their_current_week_before, their_current_week_after = simulate_trade(
+        other_current, starting_slots, receive_set, give_current
+    )
+
+    # --- Future weeks: neutral Gridlytics base rate, normal availability, bye-excluded ---
+    my_neutral = _neutral_candidates(my_players)
+    other_neutral = _neutral_candidates(other_players)
+    my_neutral_by_id = {c["player_id"]: c for c in my_neutral}
+    other_neutral_by_id = {c["player_id"]: c for c in other_neutral}
+    receive_neutral = [other_neutral_by_id[pid] for pid in receive_player_ids if pid in other_neutral_by_id]
+    give_neutral = [my_neutral_by_id[pid] for pid in give_player_ids if pid in my_neutral_by_id]
+
+    your_future_before = 0.0
+    your_future_after = 0.0
+    their_future_before = 0.0
+    their_future_after = 0.0
+    for week in future_weeks:
+        playing_teams = teams_playing_by_week.get(week, set())
+        my_week = _exclude_bye(my_neutral, playing_teams)
+        other_week = _exclude_bye(other_neutral, playing_teams)
+        receive_week = _exclude_bye(receive_neutral, playing_teams)
+        give_week = _exclude_bye(give_neutral, playing_teams)
+
+        week_before, week_after = simulate_trade(my_week, starting_slots, give_set, receive_week)
+        your_future_before += week_before
+        your_future_after += week_after
+
+        week_before, week_after = simulate_trade(other_week, starting_slots, receive_set, give_week)
+        their_future_before += week_before
+        their_future_after += week_after
+
+    your_ros_before = your_current_week_before + your_future_before
+    your_ros_after = your_current_week_after + your_future_after
+    their_ros_before = their_current_week_before + their_future_before
+    their_ros_after = their_current_week_after + their_future_after
 
     return {
+        "weeks_remaining": len(weeks),
         "your_team": {
-            "current_points": your_current, "projected_points": your_projected,
-            "delta": your_projected - your_current,
-            "reasons": _reasons_for(receive_player_ids, other_by_id, other_names),
+            "current_week_before": your_current_week_before, "current_week_after": your_current_week_after,
+            "current_week_delta": your_current_week_after - your_current_week_before,
+            "rest_of_season_before": your_ros_before, "rest_of_season_after": your_ros_after,
+            "rest_of_season_delta": your_ros_after - your_ros_before,
+            # Context only -- what the manager actually has started this week, never used in the
+            # delta above. Can differ from current_week_before when the real lineup isn't optimal.
+            "actual_current_starters_points": your_actual_current_starters_points,
+            "reasons": _reasons_for(receive_player_ids, other_current_by_id, other_names),
         },
         "other_team": {
-            "current_points": their_current, "projected_points": their_projected,
-            "delta": their_projected - their_current,
-            "reasons": _reasons_for(give_player_ids, my_by_id, my_names),
+            "current_week_before": their_current_week_before, "current_week_after": their_current_week_after,
+            "current_week_delta": their_current_week_after - their_current_week_before,
+            "rest_of_season_before": their_ros_before, "rest_of_season_after": their_ros_after,
+            "rest_of_season_delta": their_ros_after - their_ros_before,
+            "actual_current_starters_points": their_actual_current_starters_points,
+            "reasons": _reasons_for(give_player_ids, my_current_by_id, my_names),
         },
     }

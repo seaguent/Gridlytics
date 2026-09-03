@@ -548,6 +548,10 @@ def test_trade_analysis_endpoint_returns_both_sides_deltas(client, test_engine):
     import asyncio
     asyncio.run(seed())
 
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
+        return_value=httpx.Response(200, text="season,week,home_team,away_team,gameday\n")
+    )
+
     my_team_response = client.post(
         "/leagues/me/my-team", json={"team_id": my_team_id}, headers={"Authorization": "Bearer trade-token"}
     )
@@ -560,8 +564,11 @@ def test_trade_analysis_endpoint_returns_both_sides_deltas(client, test_engine):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["your_team"]["delta"] == pytest.approx(15.0)
-    assert body["other_team"]["delta"] == pytest.approx(-15.0)
+    assert body["your_team"]["current_week_delta"] == pytest.approx(15.0)
+    assert body["your_team"]["rest_of_season_delta"] == pytest.approx(15.0)
+    assert body["other_team"]["current_week_delta"] == pytest.approx(-15.0)
+    assert body["other_team"]["rest_of_season_delta"] == pytest.approx(-15.0)
+    assert "weeks_remaining" in body
 
 
 @respx.mock
@@ -634,8 +641,9 @@ def test_espn_trade_analysis_endpoint_matches_sleeper_shape(client, test_engine)
         headers={"Authorization": "Bearer espn-trade-token"},
     )
     assert response.status_code == 200
-    assert set(response.json().keys()) == {"your_team", "other_team"}
-    assert response.json()["your_team"]["delta"] == pytest.approx(4.0)
+    assert set(response.json().keys()) == {"your_team", "other_team", "weeks_remaining"}
+    assert response.json()["your_team"]["current_week_delta"] == pytest.approx(4.0)
+    assert response.json()["your_team"]["rest_of_season_delta"] == pytest.approx(4.0)
 
 
 @respx.mock
