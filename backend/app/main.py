@@ -23,7 +23,7 @@ from app.db import engine
 from app.deps import get_current_connection, get_current_league, get_fresh_league, get_my_team, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
-from app.models import Base, League, LeagueConnection, ProjectionRecord, Team
+from app.models import Base, League, LeagueConnection, Player, ProjectionRecord, RosterSlot, Team
 from app.nflverse.client import NflverseClient
 from app.nflverse.sync import sync_usage_stats
 from app.projections.accuracy_pipeline import load_projection_accuracy
@@ -35,6 +35,7 @@ from app.projections.nflverse_metrics import NflverseMetricsProvider
 from app.projections.rows import metrics_to_dict
 from app.projections.sleeper import SleeperProjectionProvider
 from app.projections.start_sit import compute_start_sit
+from app.projections.trade_analysis import InvalidTradeError, compute_trade_analysis
 from app.projections.uncertainty_pipeline import apply_uncertainty_ranges
 from app.projections.available_players import EspnAuthError
 from app.projections.value import compute_value_over_replacement
@@ -255,6 +256,32 @@ async def get_roster_efficiency(
     ]
 
 
+@app.get("/leagues/me/teams/{team_id}/roster")
+async def get_team_roster(
+    team_id: int,
+    league: League = Depends(get_fresh_league),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    result = await session.execute(select(Team).where(Team.id == team_id, Team.league_id == league.id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Team not found in this league")
+
+    result = await session.execute(
+        select(RosterSlot.platform_player_id).where(
+            RosterSlot.team_id == team_id, RosterSlot.week == league.current_week
+        )
+    )
+    player_ids = [pid for (pid,) in result.all()]
+
+    result = await session.execute(
+        select(Player).where(Player.platform == league.platform, Player.platform_player_id.in_(player_ids))
+    )
+    return [
+        {"platform_player_id": p.platform_player_id, "name": p.name, "position": p.position}
+        for p in result.scalars()
+    ]
+
+
 @app.get("/leagues/me/playoff-odds")
 async def get_playoff_odds(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
@@ -469,6 +496,27 @@ async def get_start_sit(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await compute_start_sit(session, league, team)
+
+
+class TradeAnalysisRequest(BaseModel):
+    other_team_id: int
+    give_player_ids: list[str] = []
+    receive_player_ids: list[str] = []
+
+
+@app.post("/leagues/me/trade-analysis")
+async def post_trade_analysis(
+    body: TradeAnalysisRequest,
+    league: League = Depends(get_fresh_league),
+    team: Team = Depends(get_my_team),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        return await compute_trade_analysis(
+            session, league, team.id, body.other_team_id, body.give_player_ids, body.receive_player_ids
+        )
+    except InvalidTradeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/leagues/me/waivers")

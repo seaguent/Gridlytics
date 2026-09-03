@@ -201,6 +201,24 @@ export interface WaiverResponse {
   recommendations: WaiverRow[];
 }
 
+export interface TradeSideResult {
+  current_points: number;
+  projected_points: number;
+  delta: number;
+  reasons: string[];
+}
+
+export interface TradeAnalysisResponse {
+  your_team: TradeSideResult;
+  other_team: TradeSideResult;
+}
+
+export interface TeamRosterPlayer {
+  platform_player_id: string;
+  name: string;
+  position: string;
+}
+
 export interface SourceAccuracy {
   source: string;
   mae: number;
@@ -308,4 +326,21 @@ export async function fetchEspnWaivers(
     throw new Error(response.error ?? "Request to /leagues/me/waivers failed");
   }
   return response.data as WaiverResponse;
+}
+
+export function fetchTradeAnalysis(
+  token: string,
+  otherTeamId: number,
+  giveIds: string[],
+  receiveIds: string[]
+): Promise<TradeAnalysisResponse> {
+  return postJson("/leagues/me/trade-analysis", token, {
+    other_team_id: otherTeamId,
+    give_player_ids: giveIds,
+    receive_player_ids: receiveIds,
+  });
+}
+
+export function fetchTeamRoster(token: string, teamId: number): Promise<TeamRosterPlayer[]> {
+  return fetchJson(`/leagues/me/teams/${teamId}/roster`, token);
 }

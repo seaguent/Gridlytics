@@ -25,6 +25,7 @@ import { Recap } from "./Recap";
 import { Standings } from "./Standings";
 import { StartSit } from "./StartSit";
 import { TeamPicker } from "./TeamPicker";
+import { Trades } from "./Trades";
 import { Waivers } from "./Waivers";
 
 export type OverlayLeague =
@@ -36,7 +37,16 @@ function formatSubtitle(info: LeagueInfo): string {
   return `${info.name} · ${period}`;
 }
 
-type Tab = "standings" | "power" | "playoffs" | "efficiency" | "recap" | "rankings" | "startSit" | "waivers";
+type Tab =
+  | "standings"
+  | "power"
+  | "playoffs"
+  | "efficiency"
+  | "recap"
+  | "rankings"
+  | "startSit"
+  | "waivers"
+  | "trades";
 
 interface ConnectResponse {
   ok: boolean;
@@ -299,18 +309,24 @@ export function Overlay({ league }: { league: OverlayLeague }) {
               >
                 Waivers
               </button>
+              <button
+                className={tab === "trades" ? "gl-tab gl-tab--active" : "gl-tab"}
+                onClick={() => setTab("trades")}
+              >
+                Trades
+              </button>
             </div>
 
             {connectError && <div className="gl-error">{connectError}</div>}
 
             <div className="gl-body">
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && error && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && tab !== "trades" && error && (
                 <div className="gl-error">{error}</div>
               )}
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && !error && !dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && tab !== "trades" && !error && !dataReady && (
                 <div className="gl-loading">Loading...</div>
               )}
-              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && dataReady && (
+              {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && tab !== "trades" && dataReady && (
                 <>
                   {tab === "standings" && <Standings rows={standings} />}
                   {tab === "power" && <PowerRankings rows={powerRankings} />}
@@ -396,6 +412,18 @@ export function Overlay({ league }: { league: OverlayLeague }) {
                 <>
                   {waiversError && <div className="gl-error">{waiversError}</div>}
                   {!waiversError && <Waivers data={waivers} />}
+                </>
+              )}
+
+              {tab === "trades" && (
+                <>
+                  {!leagueInfo && <div className="gl-loading">Loading...</div>}
+                  {leagueInfo && !leagueInfo.my_team_id && standings && (
+                    <TeamPicker teams={standings} onSelect={handleSelectTeam} saving={settingTeam} />
+                  )}
+                  {leagueInfo && leagueInfo.my_team_id && standings && token && (
+                    <Trades token={token} myTeamId={leagueInfo.my_team_id} standings={standings} />
+                  )}
                 </>
               )}
             </div>

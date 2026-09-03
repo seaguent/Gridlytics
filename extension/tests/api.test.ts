@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchEspnWaivers, fetchStandings, fetchStartSit, fetchWaivers, setMyTeam } from "../src/api";
+import {
+  fetchEspnWaivers,
+  fetchStandings,
+  fetchStartSit,
+  fetchTeamRoster,
+  fetchTradeAnalysis,
+  fetchWaivers,
+  setMyTeam,
+} from "../src/api";
 
 describe("fetchStandings", () => {
   afterEach(() => {
@@ -140,6 +148,82 @@ describe("fetchEspnWaivers", () => {
       leagueId: "999",
       season: "2026",
       week: 3,
+      token: "my-token",
+    });
+  });
+});
+
+describe("fetchTradeAnalysis", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves with the data from a successful API_POST response", async () => {
+    const data = {
+      your_team: { current_points: 3.0, projected_points: 18.0, delta: 15.0, reasons: [] },
+      other_team: { current_points: 18.0, projected_points: 3.0, delta: -15.0, reasons: [] },
+    };
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage: vi.fn().mockResolvedValue({ ok: true, data }) },
+    });
+
+    await expect(fetchTradeAnalysis("my-token", 7, ["give1"], ["receive1", "receive2"])).resolves.toEqual(data);
+  });
+
+  it("sends the trade payload and token in the message to the background script", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        your_team: { current_points: 0, projected_points: 0, delta: 0, reasons: [] },
+        other_team: { current_points: 0, projected_points: 0, delta: 0, reasons: [] },
+      },
+    });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    await fetchTradeAnalysis("my-token", 7, ["give1"], ["receive1"]);
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: "API_POST",
+      path: "/leagues/me/trade-analysis",
+      token: "my-token",
+      body: { other_team_id: 7, give_player_ids: ["give1"], receive_player_ids: ["receive1"] },
+    });
+  });
+
+  it("throws when the backend reports a validation error", async () => {
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn().mockResolvedValue({ ok: false, error: "Request failed with status 400" }),
+      },
+    });
+
+    await expect(fetchTradeAnalysis("bad-token", 7, [], [])).rejects.toThrow("400");
+  });
+});
+
+describe("fetchTeamRoster", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves with the roster from a successful API_GET response", async () => {
+    const roster = [{ platform_player_id: "p1", name: "Some WR", position: "WR" }];
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage: vi.fn().mockResolvedValue({ ok: true, data: roster }) },
+    });
+
+    await expect(fetchTeamRoster("my-token", 7)).resolves.toEqual(roster);
+  });
+
+  it("sends the team id in the path with the token", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: [] });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    await fetchTeamRoster("my-token", 7);
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: "API_GET",
+      path: "/leagues/me/teams/7/roster",
       token: "my-token",
     });
   });

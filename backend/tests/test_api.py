@@ -498,6 +498,195 @@ def test_espn_waivers_endpoint_returns_400_when_raw_data_missing(client):
 
 
 @respx.mock
+def test_trade_analysis_endpoint_returns_both_sides_deltas(client, test_engine):
+    _mock_sleeper_league()
+    connect_response = client.post(
+        "/connections",
+        json={"platform": "sleeper", "platform_league_id": "123", "access_token_hash": hash_token("trade-token")},
+    )
+    league_id = connect_response.json()["league_id"]
+
+    from sqlalchemy import select as sa_select
+
+    from app.models import League, Player, ProjectionRecord, RosterSlot, Team
+
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    my_team_id = None
+    other_team_id = None
+
+    async def seed():
+        nonlocal my_team_id, other_team_id
+        async with session_factory() as session:
+            result = await session.execute(sa_select(League).where(League.id == league_id))
+            league = result.scalar_one()
+            # _mock_sleeper_league's response has no roster_positions field, so this leagues
+            # syncs with an empty list -- find_optimal_lineup would never start anyone without a
+            # real starting_slots list, which would mask the real delta with 0.0 for everyone.
+            league.roster_positions = ["QB", "RB", "WR", "TE", "FLEX", "BN"]
+
+            my_team = Team(league_id=league_id, platform_roster_id="my", display_name="Mine")
+            other_team = Team(league_id=league_id, platform_roster_id="theirs", display_name="Theirs")
+            session.add_all([my_team, other_team])
+            await session.flush()
+            session.add_all([
+                Player(platform="sleeper", platform_player_id="my_weak_wr", position="WR", name="My Weak WR"),
+                Player(platform="sleeper", platform_player_id="their_star_wr", position="WR", name="Their Star WR"),
+            ])
+            session.add_all([
+                RosterSlot(team_id=my_team.id, week=1, platform_player_id="my_weak_wr", is_starter=True, points=0),
+                RosterSlot(team_id=other_team.id, week=1, platform_player_id="their_star_wr", is_starter=True, points=0),
+            ])
+            session.add_all([
+                ProjectionRecord(league_id=league_id, platform_player_id="my_weak_wr", week=1, source="sleeper",
+                                  name="My Weak WR", position="WR", projected_points=3.0),
+                ProjectionRecord(league_id=league_id, platform_player_id="their_star_wr", week=1, source="sleeper",
+                                  name="Their Star WR", position="WR", projected_points=18.0),
+            ])
+            await session.commit()
+            my_team_id, other_team_id = my_team.id, other_team.id
+
+    import asyncio
+    asyncio.run(seed())
+
+    my_team_response = client.post(
+        "/leagues/me/my-team", json={"team_id": my_team_id}, headers={"Authorization": "Bearer trade-token"}
+    )
+    assert my_team_response.status_code == 200
+
+    response = client.post(
+        "/leagues/me/trade-analysis",
+        json={"other_team_id": other_team_id, "give_player_ids": ["my_weak_wr"], "receive_player_ids": ["their_star_wr"]},
+        headers={"Authorization": "Bearer trade-token"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["your_team"]["delta"] == pytest.approx(15.0)
+    assert body["other_team"]["delta"] == pytest.approx(-15.0)
+
+
+@respx.mock
+def test_trade_analysis_endpoint_returns_400_when_no_team_selected(client):
+    _mock_sleeper_league()
+    client.post(
+        "/connections",
+        json={"platform": "sleeper", "platform_league_id": "123", "access_token_hash": hash_token("no-team-trade-token")},
+    )
+    response = client.post(
+        "/leagues/me/trade-analysis",
+        json={"other_team_id": 1, "give_player_ids": ["x"], "receive_player_ids": ["y"]},
+        headers={"Authorization": "Bearer no-team-trade-token"},
+    )
+    assert response.status_code == 400
+
+
+@respx.mock
+def test_espn_trade_analysis_endpoint_matches_sleeper_shape(client, test_engine):
+    import copy
+
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+    raw = copy.deepcopy(SAMPLE_RAW)
+    connect_response = client.post(
+        "/connections/espn", json={"raw_league_data": raw, "access_token_hash": hash_token("espn-trade-token")},
+    )
+    league_id = connect_response.json()["league_id"]
+
+    from app.models import Player, ProjectionRecord, RosterSlot, Team
+
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    my_team_id = None
+    other_team_id = None
+
+    async def seed():
+        nonlocal my_team_id, other_team_id
+        async with session_factory() as session:
+            my_team = Team(league_id=league_id, platform_roster_id="e-my", display_name="Mine")
+            other_team = Team(league_id=league_id, platform_roster_id="e-theirs", display_name="Theirs")
+            session.add_all([my_team, other_team])
+            await session.flush()
+            session.add_all([
+                Player(platform="espn", platform_player_id="e_my_wr", position="WR", name="My WR"),
+                Player(platform="espn", platform_player_id="e_their_wr", position="WR", name="Their WR"),
+            ])
+            session.add_all([
+                RosterSlot(team_id=my_team.id, week=3, platform_player_id="e_my_wr", is_starter=True, points=0),
+                RosterSlot(team_id=other_team.id, week=3, platform_player_id="e_their_wr", is_starter=True, points=0),
+            ])
+            session.add_all([
+                ProjectionRecord(league_id=league_id, platform_player_id="e_my_wr", week=3, source="espn",
+                                  name="My WR", position="WR", projected_points=5.0),
+                ProjectionRecord(league_id=league_id, platform_player_id="e_their_wr", week=3, source="espn",
+                                  name="Their WR", position="WR", projected_points=9.0),
+            ])
+            await session.commit()
+            my_team_id, other_team_id = my_team.id, other_team.id
+
+    import asyncio
+    asyncio.run(seed())
+
+    client.post(
+        "/leagues/me/my-team", json={"team_id": my_team_id}, headers={"Authorization": "Bearer espn-trade-token"}
+    )
+    response = client.post(
+        "/leagues/me/trade-analysis",
+        json={"other_team_id": other_team_id, "give_player_ids": ["e_my_wr"], "receive_player_ids": ["e_their_wr"]},
+        headers={"Authorization": "Bearer espn-trade-token"},
+    )
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {"your_team", "other_team"}
+    assert response.json()["your_team"]["delta"] == pytest.approx(4.0)
+
+
+@respx.mock
+def test_team_roster_endpoint_returns_players_for_any_team_in_the_league(client, test_engine):
+    _mock_sleeper_league()
+    connect_response = client.post(
+        "/connections",
+        json={"platform": "sleeper", "platform_league_id": "123", "access_token_hash": hash_token("roster-endpoint-token")},
+    )
+    league_id = connect_response.json()["league_id"]
+
+    from app.models import Player, RosterSlot, Team
+
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    other_team_id = None
+
+    async def seed():
+        nonlocal other_team_id
+        async with session_factory() as session:
+            other_team = Team(league_id=league_id, platform_roster_id="other", display_name="Other")
+            session.add(other_team)
+            await session.flush()
+            session.add(Player(platform="sleeper", platform_player_id="p1", position="WR", name="Some WR"))
+            session.add(RosterSlot(team_id=other_team.id, week=1, platform_player_id="p1", is_starter=True, points=0))
+            await session.commit()
+            other_team_id = other_team.id
+
+    import asyncio
+    asyncio.run(seed())
+
+    response = client.get(
+        f"/leagues/me/teams/{other_team_id}/roster", headers={"Authorization": "Bearer roster-endpoint-token"}
+    )
+    assert response.status_code == 200
+    assert response.json() == [{"platform_player_id": "p1", "name": "Some WR", "position": "WR"}]
+
+
+@respx.mock
+def test_team_roster_endpoint_returns_404_for_team_outside_the_league(client):
+    _mock_sleeper_league()
+    client.post(
+        "/connections",
+        json={"platform": "sleeper", "platform_league_id": "123", "access_token_hash": hash_token("roster-404-token")},
+    )
+    response = client.get(
+        "/leagues/me/teams/999999/roster", headers={"Authorization": "Bearer roster-404-token"}
+    )
+    assert response.status_code == 404
+
+
+@respx.mock
 def test_espn_connection_and_resync_flow(client):
     from tests.espn.test_parser import SAMPLE_RAW
 

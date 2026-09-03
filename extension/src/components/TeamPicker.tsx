@@ -5,16 +5,18 @@ export function TeamPicker({
   teams,
   onSelect,
   saving,
+  label = "Which team is yours?",
 }: {
   teams: StandingRow[];
   onSelect: (teamId: number) => void;
   saving: boolean;
+  label?: string;
 }) {
   const [selected, setSelected] = useState<number | "">("");
 
   return (
     <div className="gl-team-picker">
-      <div className="gl-team-picker-label">Which team is yours?</div>
+      <div className="gl-team-picker-label">{label}</div>
       <select
         className="gl-team-picker-select"
         value={selected}
