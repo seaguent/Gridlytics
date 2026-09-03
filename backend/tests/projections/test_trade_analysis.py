@@ -84,9 +84,11 @@ async def _make_league_with_two_teams(db_session) -> tuple[League, Team, Team]:
     return league, my_team, other_team
 
 
-async def _add_player(db_session, league, team, pid, position, name, points):
+async def _add_player(db_session, league, team, pid, position, name, points, is_starter=True):
     db_session.add(Player(platform=league.platform, platform_player_id=pid, position=position, name=name))
-    db_session.add(RosterSlot(team_id=team.id, week=league.current_week, platform_player_id=pid, is_starter=True, points=0))
+    db_session.add(
+        RosterSlot(team_id=team.id, week=league.current_week, platform_player_id=pid, is_starter=is_starter, points=0)
+    )
     db_session.add(
         ProjectionRecord(
             league_id=league.id, platform_player_id=pid, week=league.current_week, source=league.platform,
@@ -115,6 +117,28 @@ async def test_compute_trade_analysis_computes_real_deltas_for_both_sides(db_ses
     assert result["other_team"]["delta"] == pytest.approx(-15.0)
     assert len(result["your_team"]["reasons"]) > 0
     assert len(result["other_team"]["reasons"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_compute_trade_analysis_current_points_uses_real_current_starters_not_the_optimal_lineup(db_session):
+    """Matches Start/Sit's own current_lineup_points semantics exactly: "current" is what the
+    manager actually has started (RosterSlot.is_starter), not the mathematically-best lineup --
+    those two only coincide when the real lineup happens to already be optimal."""
+    league, my_team, other_team = await _make_league_with_two_teams(db_session)
+    # A real, suboptimal lineup: the manager started the weaker WR while a much better one sits
+    # on the bench -- this is the exact scenario that exposes the bug.
+    await _add_player(db_session, league, my_team, "weak_starter_wr", "WR", "Weak Starter", 5.0, is_starter=True)
+    await _add_player(db_session, league, my_team, "bench_star_wr", "WR", "Bench Star", 20.0, is_starter=False)
+    await _add_player(db_session, league, other_team, "their_wr", "WR", "Their WR", 8.0)
+    await db_session.commit()
+
+    result = await compute_trade_analysis(
+        db_session, league, my_team.id, other_team.id,
+        give_player_ids=[], receive_player_ids=["their_wr"],
+    )
+
+    # 5.0 (the real current starter), never 20.0 (what find_optimal_lineup would have picked).
+    assert result["your_team"]["current_points"] == pytest.approx(5.0)
 
 
 @pytest.mark.asyncio

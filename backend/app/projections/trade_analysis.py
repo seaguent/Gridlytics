@@ -28,13 +28,15 @@ class InvalidTradeError(Exception):
 
 async def _load_roster_candidates(
     session: AsyncSession, league: League, team_id: int
-) -> tuple[list[dict], dict[str, str]]:
+) -> tuple[list[dict], dict[str, str], set[str]]:
     result = await session.execute(
-        select(RosterSlot.platform_player_id).where(
+        select(RosterSlot.platform_player_id, RosterSlot.is_starter).where(
             RosterSlot.team_id == team_id, RosterSlot.week == league.current_week
         )
     )
-    player_ids = [pid for (pid,) in result.all()]
+    roster_rows = result.all()
+    player_ids = [pid for pid, _ in roster_rows]
+    starting_ids = {pid for pid, is_starter in roster_rows if is_starter}
 
     result = await session.execute(
         select(Player).where(Player.platform == league.platform, Player.platform_player_id.in_(player_ids))
@@ -68,7 +70,7 @@ async def _load_roster_candidates(
             continue
         candidates.append({"player_id": pid, "position": player.position, "points": final})
         names_by_id[pid] = player.name
-    return candidates, names_by_id
+    return candidates, names_by_id, starting_ids
 
 
 def _reasons_for(pids: list[str], candidates_by_id: dict[str, dict], names_by_id: dict[str, str]) -> list[str]:
@@ -100,8 +102,8 @@ async def compute_trade_analysis(
     if result.scalar_one_or_none() is None:
         raise InvalidTradeError("That team is not in this league")
 
-    my_candidates, my_names = await _load_roster_candidates(session, league, my_team_id)
-    other_candidates, other_names = await _load_roster_candidates(session, league, other_team_id)
+    my_candidates, my_names, my_starting_ids = await _load_roster_candidates(session, league, my_team_id)
+    other_candidates, other_names, other_starting_ids = await _load_roster_candidates(session, league, other_team_id)
     my_ids = {c["player_id"] for c in my_candidates}
     other_ids = {c["player_id"] for c in other_candidates}
 
@@ -120,8 +122,14 @@ async def compute_trade_analysis(
     receive_candidates = [other_by_id[pid] for pid in receive_player_ids]
     give_candidates = [my_by_id[pid] for pid in give_player_ids]
 
-    your_current, your_projected = simulate_trade(my_candidates, starting_slots, give_set, receive_candidates)
-    their_current, their_projected = simulate_trade(other_candidates, starting_slots, receive_set, give_candidates)
+    # "current" matches Start/Sit's own current_lineup_points exactly: the real, actually-started
+    # players (RosterSlot.is_starter), not the mathematically-optimal lineup -- those two only
+    # coincide when the manager's real lineup already happens to be optimal.
+    your_current = sum(c["points"] for c in my_candidates if c["player_id"] in my_starting_ids)
+    their_current = sum(c["points"] for c in other_candidates if c["player_id"] in other_starting_ids)
+
+    _, your_projected = simulate_trade(my_candidates, starting_slots, give_set, receive_candidates)
+    _, their_projected = simulate_trade(other_candidates, starting_slots, receive_set, give_candidates)
 
     return {
         "your_team": {

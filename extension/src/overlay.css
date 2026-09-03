@@ -536,3 +536,78 @@
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+
+.gl-trade-partner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.gl-trade-partner-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gl-trade-change-partner {
+  background: none;
+  border: none;
+  color: var(--gl-accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.gl-trade-section {
+  margin-bottom: 16px;
+}
+
+.gl-trade-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.gl-position-group-label {
+  color: var(--gl-text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 10px 0 4px;
+}
+
+.gl-player-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--gl-bg-card);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.gl-player-checkbox input[type="checkbox"] {
+  accent-color: var(--gl-accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gl-player-checkbox-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.gl-player-checkbox-position {
+  color: var(--gl-text-muted);
+  font-size: 11px;
+}
+
+.gl-trade-results {
+  margin-top: 12px;
+}

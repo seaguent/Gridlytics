@@ -8,6 +8,57 @@ import {
 } from "../api";
 import { TeamPicker } from "./TeamPicker";
 
+const POSITION_ORDER = ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"];
+
+function groupByPosition(players: TeamRosterPlayer[]): [string, TeamRosterPlayer[]][] {
+  const groups = new Map<string, TeamRosterPlayer[]>();
+  for (const player of players) {
+    const group = groups.get(player.position) ?? [];
+    group.push(player);
+    groups.set(player.position, group);
+  }
+  const ordered = [...groups.keys()].sort((a, b) => {
+    const ai = POSITION_ORDER.indexOf(a);
+    const bi = POSITION_ORDER.indexOf(b);
+    return (ai === -1 ? POSITION_ORDER.length : ai) - (bi === -1 ? POSITION_ORDER.length : bi);
+  });
+  return ordered.map((position) => [position, groups.get(position)!]);
+}
+
+function PlayerChecklist({
+  roster,
+  selected,
+  onToggle,
+}: {
+  roster: TeamRosterPlayer[] | null;
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  if (roster === null) return <div className="gl-loading">Loading...</div>;
+  if (roster.length === 0) return <div className="gl-loading">No players on this roster.</div>;
+
+  return (
+    <>
+      {groupByPosition(roster).map(([position, players]) => (
+        <div key={position}>
+          <div className="gl-position-group-label">{position}</div>
+          {players.map((p) => (
+            <label className="gl-player-checkbox" key={p.platform_player_id}>
+              <input
+                type="checkbox"
+                checked={selected.has(p.platform_player_id)}
+                onChange={() => onToggle(p.platform_player_id)}
+              />
+              <span className="gl-player-checkbox-name">{p.name}</span>
+              <span className="gl-player-checkbox-position">{p.position}</span>
+            </label>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function DeltaCard({ label, result }: { label: string; result: TradeAnalysisResponse["your_team"] }) {
   return (
     <div className="gl-row">
@@ -48,12 +99,24 @@ export function Trades({
   const [error, setError] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
 
+  const resetToPicker = () => {
+    setOtherTeamId(null);
+    setMyRoster(null);
+    setTheirRoster(null);
+    setGiveIds(new Set());
+    setReceiveIds(new Set());
+    setResult(null);
+    setError(null);
+  };
+
   const handleSelectPartner = async (teamId: number) => {
     setOtherTeamId(teamId);
     setResult(null);
     setError(null);
     setGiveIds(new Set());
     setReceiveIds(new Set());
+    setMyRoster(null);
+    setTheirRoster(null);
     const [mine, theirs] = await Promise.all([fetchTeamRoster(token, myTeamId), fetchTeamRoster(token, teamId)]);
     setMyRoster(mine);
     setTheirRoster(theirs);
@@ -91,47 +154,43 @@ export function Trades({
     );
   }
 
+  const partnerName = standings.find((t) => t.team_id === otherTeamId)?.display_name ?? "this team";
+  const canEvaluate = giveIds.size > 0 || receiveIds.size > 0;
+
   return (
-    <div className="gl-list">
-      <div className="gl-row">
-        <div className="gl-row-main">
-          <span className="gl-row-name">You give</span>
-        </div>
-        {(myRoster ?? []).map((p) => (
-          <label key={p.platform_player_id} className="gl-row-stats">
-            <input
-              type="checkbox"
-              checked={giveIds.has(p.platform_player_id)}
-              onChange={() => toggle(giveIds, setGiveIds, p.platform_player_id)}
-            />
-            {p.name} ({p.position})
-          </label>
-        ))}
+    <div>
+      <div className="gl-trade-partner">
+        <span className="gl-trade-partner-name">Trading with {partnerName}</span>
+        <button className="gl-trade-change-partner" onClick={resetToPicker}>
+          Change
+        </button>
       </div>
-      <div className="gl-row">
-        <div className="gl-row-main">
-          <span className="gl-row-name">You receive</span>
-        </div>
-        {(theirRoster ?? []).map((p) => (
-          <label key={p.platform_player_id} className="gl-row-stats">
-            <input
-              type="checkbox"
-              checked={receiveIds.has(p.platform_player_id)}
-              onChange={() => toggle(receiveIds, setReceiveIds, p.platform_player_id)}
-            />
-            {p.name} ({p.position})
-          </label>
-        ))}
+
+      <div className="gl-trade-section">
+        <div className="gl-trade-section-label">You give</div>
+        <PlayerChecklist roster={myRoster} selected={giveIds} onToggle={(id) => toggle(giveIds, setGiveIds, id)} />
       </div>
-      <button className="gl-connect" onClick={handleEvaluate} disabled={evaluating}>
+
+      <div className="gl-trade-section">
+        <div className="gl-trade-section-label">You receive</div>
+        <PlayerChecklist
+          roster={theirRoster}
+          selected={receiveIds}
+          onToggle={(id) => toggle(receiveIds, setReceiveIds, id)}
+        />
+      </div>
+
+      <button className="gl-connect" onClick={handleEvaluate} disabled={evaluating || !canEvaluate}>
         {evaluating ? "Evaluating..." : "Evaluate Trade"}
       </button>
+
       {error && <div className="gl-error">{error}</div>}
+
       {result && (
-        <>
+        <div className="gl-list gl-trade-results">
           <DeltaCard label="Your team" result={result.your_team} />
           <DeltaCard label="Their team" result={result.other_team} />
-        </>
+        </div>
       )}
     </div>
   );
