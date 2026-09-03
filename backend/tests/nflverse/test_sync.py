@@ -629,3 +629,85 @@ async def test_sync_usage_stats_gridlytics_projection_is_idempotent(db_session):
         )
     )
     assert len(result.scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_effective_role_promotes_backup_rb_when_starter_ruled_out(db_session):
+    """Real, DB-backed proof that the effective-role mechanism fires through the actual
+    production entrypoint (sync_usage_stats), not just in isolated unit tests. RB1
+    (00-0011111) is SF's real depth-chart rank-1 RB with real week-1 rushing stats already in
+    the shared fixtures. RB2 (00-0022222) is added here as SF's rank-2 backup with zero own
+    history. A third player (00-0044444, KC) is added purely to seed a real rank-2 share prior,
+    so both scenarios resolve through the context-aware model -- never native fallback -- making
+    this an apples-to-apples comparison of the SAME model, differing only by which rank RB2 is
+    evaluated at."""
+    league = await _make_league(db_session, "sleeper")
+    league.current_week = 2
+    await _add_rostered_player(db_session, league, "00-0011111")
+    await _add_rostered_player(db_session, league, "00-0022222")
+    db_session.add_all([
+        Player(platform="sleeper", platform_player_id="00-0011111", position="RB", name="RB1",
+               gsis_id="00-0011111", team="SF"),
+        Player(platform="sleeper", platform_player_id="00-0022222", position="RB", name="RB2",
+               gsis_id="00-0022222", team="SF"),
+    ])
+    await db_session.commit()
+
+    _mock_nflverse()
+    # KC starter (00-0055555, not rostered, not depth-chart-tracked -- exists purely to give KC a
+    # real team-carries total) dilutes the KC backup's own share down to a realistic ~10%, well
+    # below RB1's real ~67% share -- otherwise the backup would be KC's only ball-carrier that
+    # week (share=1.0), an artificially high "rank 2" prior that would invert the direction of
+    # this whole test.
+    extended_weekly_stats = WEEKLY_STATS_CSV + (
+        "00-0044444,KC Backup RB,RB,2024,REG,1,0,0.0,2,KC,DEN,3.0,0,0,0,8,0,0,0,0,0\n"
+        "00-0055555,KC Starter RB,RB,2024,REG,1,0,0.0,18,KC,DEN,20.0,0,0,0,90,1,0,0,0,0\n"
+    )
+    extended_depth_charts = DEPTH_CHARTS_CSV + (
+        "2024-08-01T00:00:00Z,SF,00-0022222,RB,2\n"
+        "2024-08-01T00:00:00Z,KC,00-0044444,RB,2\n"
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2024.csv").mock(
+        return_value=httpx.Response(200, text=extended_weekly_stats)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2024.csv").mock(
+        return_value=httpx.Response(200, text=extended_depth_charts)
+    )
+
+    async def rb2_projection() -> ProjectionRecord:
+        result = await db_session.execute(
+            select(ProjectionRecord).where(
+                ProjectionRecord.platform_player_id == "00-0022222", ProjectionRecord.source == "gridlytics"
+            )
+        )
+        return result.scalar_one()
+
+    client = NflverseClient()
+
+    # Scenario A: RB1 healthy. RB2 stays at its real depth-chart rank (2).
+    await sync_usage_stats(db_session, client, league)
+    record = await rb2_projection()
+    assert record.dominant_category is not None  # context-aware model resolved, not native fallback
+    # Snapshot as a plain float -- record is a SQLAlchemy identity-mapped object, and the second
+    # sync below mutates this SAME row in place, so holding onto `record` itself across the
+    # mutation would silently read the post-mutation value back for "healthy" too.
+    rb2_healthy_points = record.projected_points
+
+    # Scenario B: RB1 ruled OUT. Nothing else changes -- same weekly stats, same depth chart.
+    result = await db_session.execute(
+        select(Player).where(Player.platform == "sleeper", Player.platform_player_id == "00-0011111")
+    )
+    rb1 = result.scalar_one()
+    rb1.injury_status = "OUT"
+    await db_session.commit()
+
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+    record = await rb2_projection()
+    assert record.dominant_category is not None
+    rb2_out_points = record.projected_points
+
+    # The only real-world fact that changed between the two runs is RB1's injury_status --
+    # RB2's own weekly stats and the underlying depth chart are byte-for-byte identical.
+    assert rb2_out_points > rb2_healthy_points

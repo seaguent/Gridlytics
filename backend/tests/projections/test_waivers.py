@@ -1,6 +1,7 @@
 import httpx
 import pytest
 import respx
+from sqlalchemy import select
 
 from app.analytics.lineup import find_optimal_lineup
 from app.models import League, LeagueConnection, Player, ProjectionRecord, RosterSlot, Team
@@ -396,3 +397,252 @@ async def test_waiver_recommendation_shape_matches_between_sleeper_and_espn(db_s
     assert len(sleeper_result["recommendations"]) == 1
     assert len(espn_result["recommendations"]) == 1
     assert set(sleeper_result["recommendations"][0].keys()) == set(espn_result["recommendations"][0].keys())
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_free_agent_rb2_effective_role_promotion_when_rostered_rb1_ruled_out(db_session):
+    """Real, DB-backed proof the effective-role mechanism reuses cleanly for Waivers free-agent
+    candidates: RB2 is a free agent (not rostered by anyone), SF's real depth-chart rank-2 back.
+    RB1 is SF's rostered rank-1 starter. A KC backup exists purely to seed a real (diluted) rank-2
+    share prior so both runs resolve through the context-aware model. Only RB1's injury_status
+    changes between the two calls."""
+    league = League(
+        platform="sleeper", platform_league_id="123", season="2026", name="L", status="in_season",
+        current_week=2, roster_positions=["QB", "RB", "WR", "TE", "FLEX", "BN"],
+        scoring_settings={"rec": 1.0},
+    )
+    connection = LeagueConnection(league_id=0, access_token_hash="x", my_team_id=None)
+
+    db_session.add(
+        Player(platform="sleeper", platform_player_id="rb1_sleeper_id", position="RB", name="RB One",
+               gsis_id="00-1111", team="SF", injury_status=None)
+    )
+    await db_session.commit()
+
+    respx.get(f"{SLEEPER_BASE_URL}/players/nfl").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "rb1_sleeper_id": {"position": "RB", "full_name": "RB One", "gsis_id": "00-1111", "team": "SF"},
+                "rb2_sleeper_id": {"position": "RB", "full_name": "RB Two", "gsis_id": "00-2222", "team": "SF"},
+            },
+        )
+    )
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/rosters").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"roster_id": 1, "league_id": "123", "players": ["rb1_sleeper_id"], "settings": {}}],
+        )
+    )
+    respx.get(f"{SLEEPER_PROJECTIONS_BASE_URL}/2026/2").mock(return_value=httpx.Response(200, json=[]))
+
+    # KC starter dilutes the KC backup's own share down to a realistic ~10%, well below RB1's
+    # real ~67% share -- otherwise the backup would be KC's only ball-carrier that week (share=1.0),
+    # an artificially high "rank 2" prior that would invert the direction of this whole test
+    # (see the identical fix applied to the rostered-player sync.py integration test).
+    weekly_stats_csv = (
+        "player_id,player_display_name,position,season,season_type,week,targets,target_share,carries,"
+        "team,opponent_team,fantasy_points_ppr,receiving_yards,receiving_tds,receptions,rushing_yards,"
+        "rushing_tds,attempts,passing_yards,passing_tds,passing_interceptions\n"
+        "00-1111,RB One,RB,2026,REG,1,0,0.0,4,SF,LA,15.0,0,0,0,25,1,0,0,0,0\n"
+        "00-9998,SF QB,QB,2026,REG,1,0,0.0,2,SF,LA,14.0,0,0,0,4,0,28,190,1,0\n"
+        "00-8888,KC Backup RB,RB,2026,REG,1,0,0.0,2,KC,DEN,3.0,0,0,0,8,0,0,0,0,0\n"
+        "00-8889,KC Starter RB,RB,2026,REG,1,0,0.0,18,KC,DEN,20.0,0,0,0,90,1,0,0,0,0\n"
+    )
+    depth_charts_csv = (
+        "dt,team,gsis_id,pos_abb,pos_rank\n"
+        "2026-08-01T00:00:00Z,SF,00-1111,RB,1\n"
+        "2026-08-01T00:00:00Z,SF,00-2222,RB,2\n"
+        "2026-08-01T00:00:00Z,KC,00-8888,RB,2\n"
+    )
+    schedule_csv = "season,week,home_team,away_team,gameday\n2026,1,LA,SF,2026-09-08\n2026,2,LA,SEA,2026-09-15\n"
+
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2026.csv").mock(
+        return_value=httpx.Response(200, text=weekly_stats_csv)
+    )
+    for offset in range(1, 5):
+        year = str(2026 - offset)
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2026.csv").mock(
+        return_value=httpx.Response(200, text=depth_charts_csv)
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
+        return_value=httpx.Response(200, text=schedule_csv)
+    )
+
+    # Scenario A: RB1 healthy.
+    result_healthy = await compute_waiver_recommendations(db_session, league, connection)
+    row_healthy = next(r for r in result_healthy["recommendations"] if r["platform_player_id"] == "rb2_sleeper_id")
+    assert row_healthy["gridlytics_base_projection"] is not None  # context-aware resolved, not skipped
+
+    # Scenario B: RB1 ruled OUT. Nothing else changes -- same weekly stats, same depth chart.
+    result = await db_session.execute(
+        select(Player).where(Player.platform == "sleeper", Player.platform_player_id == "rb1_sleeper_id")
+    )
+    rb1 = result.scalar_one()
+    rb1.injury_status = "OUT"
+    await db_session.commit()
+
+    result_out = await compute_waiver_recommendations(db_session, league, connection)
+    row_out = next(r for r in result_out["recommendations"] if r["platform_player_id"] == "rb2_sleeper_id")
+    assert row_out["gridlytics_base_projection"] is not None
+
+    # The only real-world fact that changed between the two calls is RB1's injury_status.
+    assert row_out["gridlytics_base_projection"] > row_healthy["gridlytics_base_projection"]
+
+
+def _espn_effective_role_league() -> League:
+    return League(
+        platform="espn", platform_league_id="1", season="2026", name="L", status="in_season",
+        current_week=2, roster_positions=["QB", "RB", "WR", "TE", "FLEX", "BN"],
+    )
+
+
+def _espn_effective_role_crosswalk_csv() -> str:
+    return (
+        "gsis_id,display_name,espn_id,pfr_id,position\n"
+        "00-3111,RB One,111,RBOne00,RB\n"
+        "00-3222,RB Two,222,RBTwo00,RB\n"
+    )
+
+
+def _espn_effective_role_weekly_stats_csv() -> str:
+    # KC starter dilutes the KC backup's own share down to a realistic ~10% -- the same fix
+    # applied to the Sleeper and sync.py effective-role fixtures, for the same reason: an
+    # undiluted lone ball-carrier would give "rank 2" an artificially high share prior.
+    return (
+        "player_id,player_display_name,position,season,season_type,week,targets,target_share,carries,"
+        "team,opponent_team,fantasy_points_ppr,receiving_yards,receiving_tds,receptions,rushing_yards,"
+        "rushing_tds,attempts,passing_yards,passing_tds,passing_interceptions\n"
+        "00-3111,RB One,RB,2026,REG,1,0,0.0,4,SF,LA,15.0,0,0,0,25,1,0,0,0,0\n"
+        "00-9997,SF QB,QB,2026,REG,1,0,0.0,2,SF,LA,14.0,0,0,0,4,0,28,190,1,0\n"
+        "00-3888,KC Backup RB,RB,2026,REG,1,0,0.0,2,KC,DEN,3.0,0,0,0,8,0,0,0,0,0\n"
+        "00-3889,KC Starter RB,RB,2026,REG,1,0,0.0,18,KC,DEN,20.0,0,0,0,90,1,0,0,0,0\n"
+    )
+
+
+def _espn_effective_role_depth_charts_csv() -> str:
+    return (
+        "dt,team,gsis_id,pos_abb,pos_rank\n"
+        "2026-08-01T00:00:00Z,SF,00-3111,RB,1\n"
+        "2026-08-01T00:00:00Z,SF,00-3222,RB,2\n"
+        "2026-08-01T00:00:00Z,KC,00-3888,RB,2\n"
+    )
+
+
+def _espn_effective_role_schedule_csv() -> str:
+    return "season,week,home_team,away_team,gameday\n2026,1,LA,SF,2026-09-08\n2026,2,LA,SEA,2026-09-15\n"
+
+
+def _mock_espn_effective_role_nflverse():
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_2026.csv").mock(
+        return_value=httpx.Response(200, text=_espn_effective_role_weekly_stats_csv())
+    )
+    for offset in range(1, 5):
+        year = str(2026 - offset)
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_week_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_{year}.csv").mock(
+            return_value=httpx.Response(404)
+        )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/depth_charts/depth_charts_2026.csv").mock(
+        return_value=httpx.Response(200, text=_espn_effective_role_depth_charts_csv())
+    )
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/schedules/games.csv").mock(
+        return_value=httpx.Response(200, text=_espn_effective_role_schedule_csv())
+    )
+
+
+def _espn_rb2_free_agent_payload() -> dict:
+    return {
+        "players": [
+            {
+                "id": 222,
+                "onTeamId": 0,
+                "player": {
+                    "fullName": "RB Two",
+                    "defaultPositionId": 2,
+                    "proTeamId": 25,
+                    "injuryStatus": None,
+                    "stats": [],
+                },
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_espn_free_agent_rb2_effective_role_promotion_when_rostered_rb1_ruled_out(db_session):
+    """ESPN equivalent of the Sleeper injury-aware effective-role waiver test above. RB1 (ESPN id
+    111) is SF's rostered rank-1 starter -- a real Player row from this league's normal roster
+    sync, no gsis_id column (ESPN never persists one). RB2 (ESPN id 222) is a free agent, SF's
+    real rank-2 backup. The crosswalk compute_waiver_recommendations now builds once is what lets
+    it resolve both RB2's own identity AND RB1's gsis_id for the teammate-availability lookup --
+    this is the exact gap that was closed."""
+    league = _espn_effective_role_league()
+    connection = LeagueConnection(league_id=0, access_token_hash="x", my_team_id=None)
+
+    db_session.add(
+        Player(platform="espn", platform_player_id="111", position="RB", name="RB One",
+               team="SF", injury_status=None)
+    )
+    await db_session.commit()
+
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/players/players.csv").mock(
+        return_value=httpx.Response(200, text=_espn_effective_role_crosswalk_csv())
+    )
+    _mock_espn_effective_role_nflverse()
+    raw_free_agents_data = _espn_rb2_free_agent_payload()
+
+    # Scenario A: RB1 healthy. RB2 stays at its real depth-chart rank (2).
+    result_healthy = await compute_waiver_recommendations(db_session, league, connection, raw_free_agents_data)
+    row_healthy = next(r for r in result_healthy["recommendations"] if r["platform_player_id"] == "222")
+    assert row_healthy["gridlytics_base_projection"] is not None  # context-aware resolved, not skipped
+
+    # Scenario B: RB1 ruled OUT. Nothing else changes -- same weekly stats, same depth chart.
+    result = await db_session.execute(
+        select(Player).where(Player.platform == "espn", Player.platform_player_id == "111")
+    )
+    rb1 = result.scalar_one()
+    rb1.injury_status = "OUT"
+    await db_session.commit()
+
+    result_out = await compute_waiver_recommendations(db_session, league, connection, raw_free_agents_data)
+    row_out = next(r for r in result_out["recommendations"] if r["platform_player_id"] == "222")
+    assert row_out["gridlytics_base_projection"] is not None
+
+    # The only real-world fact that changed between the two calls is RB1's injury_status.
+    assert row_out["gridlytics_base_projection"] > row_healthy["gridlytics_base_projection"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_espn_waiver_request_loads_the_crosswalk_exactly_once(db_session):
+    """Regression test for the refactor itself: compute_waiver_recommendations must reuse the
+    SAME crosswalk load for both the free-agent provider and the teammate-availability lookup,
+    never fetching /players.csv a second time in the same request."""
+    league = _espn_effective_role_league()
+    connection = LeagueConnection(league_id=0, access_token_hash="x", my_team_id=None)
+
+    db_session.add(
+        Player(platform="espn", platform_player_id="111", position="RB", name="RB One",
+               team="SF", injury_status="OUT")
+    )
+    await db_session.commit()
+
+    crosswalk_route = respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/players/players.csv").mock(
+        return_value=httpx.Response(200, text=_espn_effective_role_crosswalk_csv())
+    )
+    _mock_espn_effective_role_nflverse()
+
+    await compute_waiver_recommendations(db_session, league, connection, _espn_rb2_free_agent_payload())
+
+    assert crosswalk_route.call_count == 1

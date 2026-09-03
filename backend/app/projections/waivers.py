@@ -8,6 +8,7 @@ from app.analytics.lineup import find_optimal_lineup
 from app.analytics.roster import NON_STARTING_SLOTS
 from app.models import League, LeagueConnection, Player, ProjectionRecord, RosterSlot, Team
 from app.nflverse.client import NflverseClient
+from app.nflverse.crosswalk import build_espn_lookup
 from app.projections.availability import classify_availability
 from app.projections.available_players import (
     AvailablePlayerCandidate,
@@ -18,6 +19,11 @@ from app.projections.comparative_backtest import _week_as_of_date
 from app.projections.context_aware.career_prior import compute_career_prior
 from app.projections.context_aware.career_prior_sync import build_career_seasons, fetch_season_stats_range
 from app.projections.context_aware.depth_chart import RoleInfo, load_current_roles_batch
+from app.projections.context_aware.effective_role import (
+    TeammateStatus,
+    compute_effective_pos_rank,
+    load_same_position_groups,
+)
 from app.projections.context_aware.model import (
     add_share_columns,
     compute_share_priors_by_rank,
@@ -148,11 +154,24 @@ async def compute_waiver_recommendations(
 
     mode = "projection_only" if connection.my_team_id is None else "lineup_comparison"
 
+    # espn_to_gsis (ESPN's own numeric player id -> gsis_id) is loaded exactly once per request,
+    # right here, and reused for two different things below: resolving free-agent candidate
+    # identity (handed to the provider instead of it fetching /players.csv itself) and resolving
+    # rostered ESPN teammates' Player rows for the effective-role availability lookup further
+    # down. Stays None for Sleeper, which doesn't need it -- Sleeper's own gsis_id is already
+    # directly on the Player row.
+    espn_to_gsis: dict[str, str] | None = None
     if league.platform == "sleeper":
         sleeper_provider = SleeperAvailablePlayerProvider()
         all_candidates = await sleeper_provider.get_available_players(session, league)
     else:
-        espn_provider = EspnAvailablePlayerProvider()
+        crosswalk_client = NflverseClient()
+        try:
+            crosswalk = await crosswalk_client.get_player_crosswalk()
+        finally:
+            await crosswalk_client.aclose()
+        espn_to_gsis = build_espn_lookup(crosswalk)
+        espn_provider = EspnAvailablePlayerProvider(espn_lookup=espn_to_gsis)
         all_candidates = await espn_provider.get_available_players(session, league, raw_free_agents_data)
     if not all_candidates:
         return {"mode": mode, "recommendations": []}
@@ -190,10 +209,43 @@ async def compute_waiver_recommendations(
                 recent_usage_by_gsis[gsis_id] = float((targets + carries).mean())
 
     roles_by_gsis_position = load_current_roles_batch(depth_charts, as_of_date) if as_of_date else {}
+    teammate_groups = load_same_position_groups(depth_charts, as_of_date) if as_of_date else {}
 
     narrowed = rank_and_narrow_candidates(all_candidates, recent_usage_by_gsis, roles_by_gsis_position)
     if not narrowed:
         return {"mode": mode, "recommendations": []}
+
+    # Teammate availability for the effective-role adjustment below, scoped to only the gsis_ids
+    # actually needed (one batched query, not one per candidate). Player.gsis_id is directly
+    # populated for every Sleeper player (the universal sync in app/sleeper/players.py), so
+    # teammates are found by querying that column directly. ESPN Player rows never carry a
+    # gsis_id at all -- teammates are found there via the SAME espn_to_gsis lookup built once
+    # above, reversed (gsis_id -> ESPN's own platform_player_id) to know which Player rows to
+    # query. Either way, a teammate we can't resolve is simply absent from availability_by_gsis;
+    # compute_effective_pos_rank treats that as available (no promotion), never a wrong one.
+    needed_gsis_ids: set[str] = set()
+    for candidate in narrowed:
+        if candidate.team:
+            needed_gsis_ids.update(teammate_groups.get((candidate.team, candidate.position), []))
+    availability_by_gsis: dict[str, str] = {}
+    if needed_gsis_ids and league.platform == "sleeper":
+        result = await session.execute(
+            select(Player).where(Player.platform == "sleeper", Player.gsis_id.in_(needed_gsis_ids))
+        )
+        availability_by_gsis = {
+            p.gsis_id: classify_availability(p.injury_status, is_bye=False) for p in result.scalars()
+        }
+    elif needed_gsis_ids and espn_to_gsis:
+        gsis_to_espn_id = {gsis: espn_id for espn_id, gsis in espn_to_gsis.items()}
+        needed_espn_ids = {gsis_to_espn_id[g] for g in needed_gsis_ids if g in gsis_to_espn_id}
+        if needed_espn_ids:
+            result = await session.execute(
+                select(Player).where(Player.platform == "espn", Player.platform_player_id.in_(needed_espn_ids))
+            )
+            for p in result.scalars():
+                gsis = espn_to_gsis.get(p.platform_player_id)
+                if gsis:
+                    availability_by_gsis[gsis] = classify_availability(p.injury_status, is_bye=False)
 
     multi_year_team_prior = compute_team_prior_by_team(
         weekly_years, target_season=season, lookback=LOOKBACK_SEASONS, decay=RECENCY_DECAY
@@ -233,12 +285,34 @@ async def compute_waiver_recommendations(
             role = roles_by_gsis_position.get((candidate.gsis_id, candidate.position))
             qb_context = qb_context_by_team.get(candidate.team)
             if role is not None and qb_context is not None:
+                # role.pos_rank stays the untouched, real nflverse depth-chart rank -- this is a
+                # separate, additively-derived value, never a mutation of role/roles_by_gsis_position.
+                projection_role = role
+                room = teammate_groups.get((candidate.team, candidate.position), [])
+                if room:
+                    teammates = [
+                        TeammateStatus(
+                            gsis_id=teammate_gsis_id,
+                            pos_rank=roles_by_gsis_position[(teammate_gsis_id, candidate.position)].pos_rank
+                            if (teammate_gsis_id, candidate.position) in roles_by_gsis_position else None,
+                            availability_status=availability_by_gsis.get(teammate_gsis_id, "healthy"),
+                        )
+                        for teammate_gsis_id in room
+                    ]
+                    effective_rank = compute_effective_pos_rank(candidate.gsis_id, role.pos_rank, teammates)
+                    if effective_rank != role.pos_rank:
+                        projection_role = RoleInfo(
+                            pos_rank=effective_rank,
+                            role_confidence=role.role_confidence,
+                            role_changed_recently=role.role_changed_recently,
+                        )
+
                 career_prior = compute_career_prior(
                     career_seasons, team_changed=False, role_changed_recently=role.role_changed_recently
                 )
                 tendencies = team_tendencies_v2.get(candidate.team, TeamTendencies(None, None))
                 breakdown = project_context_aware_points_detailed_v2(
-                    candidate.position, [], None, career_prior, career_seasons, tendencies, role, qb_context,
+                    candidate.position, [], None, career_prior, career_seasons, tendencies, projection_role, qb_context,
                     share_priors, position_priors.get(candidate.position, {}),
                     current_team=candidate.team, prior_season_team=candidate.team,
                     platform_points=None, availability_status="healthy",

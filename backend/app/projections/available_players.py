@@ -87,6 +87,15 @@ class EspnAuthError(Exception):
 
 
 class EspnAvailablePlayerProvider:
+    def __init__(self, espn_lookup: dict[str, str] | None = None) -> None:
+        # espn_lookup is the same shape build_espn_lookup(crosswalk) produces (ESPN's own numeric
+        # player id -> gsis_id). When the caller already loaded the crosswalk for this request
+        # (e.g. compute_waiver_recommendations, which also needs it for teammate availability),
+        # it's passed in here instead of this provider fetching /players.csv a second time. Left
+        # as None, this provider fetches it itself -- exactly the old, still-correct behavior,
+        # kept for any caller that doesn't need to share the lookup with anything else.
+        self._espn_lookup = espn_lookup
+
     async def get_available_players(
         self, session: AsyncSession, league: League, raw_free_agents_data: dict | None = None
     ) -> list[AvailablePlayerCandidate]:
@@ -100,12 +109,15 @@ class EspnAvailablePlayerProvider:
         raw = EspnFreeAgentResponse.model_validate(raw_free_agents_data)
         free_agents = parse_free_agents(raw, league.current_week)
 
-        nflverse_client = NflverseClient()
-        try:
-            crosswalk = await nflverse_client.get_player_crosswalk()
-        finally:
-            await nflverse_client.aclose()
-        espn_to_gsis = build_espn_lookup(crosswalk)
+        if self._espn_lookup is not None:
+            espn_to_gsis = self._espn_lookup
+        else:
+            nflverse_client = NflverseClient()
+            try:
+                crosswalk = await nflverse_client.get_player_crosswalk()
+            finally:
+                await nflverse_client.aclose()
+            espn_to_gsis = build_espn_lookup(crosswalk)
 
         fantasy_positions = FIXED_POSITIONS & {
             position for slot in league.roster_positions for position in _SLOT_POSITIONS.get(slot, set())

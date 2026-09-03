@@ -29,11 +29,17 @@ from app.nflverse.crosswalk import (
     normalize_name,
     normalize_team,
 )
+from app.projections.availability import classify_availability
 from app.projections.blending import prior_season_weight
 from app.projections.comparative_backtest import _week_as_of_date
 from app.projections.context_aware.career_prior import compute_career_prior
 from app.projections.context_aware.career_prior_sync import build_career_seasons, fetch_season_stats_range
 from app.projections.context_aware.depth_chart import RoleInfo, load_current_roles_batch
+from app.projections.context_aware.effective_role import (
+    TeammateStatus,
+    compute_effective_pos_rank,
+    load_same_position_groups,
+)
 from app.projections.context_aware.model import (
     CareerAwareBreakdown,
     add_share_columns,
@@ -314,6 +320,16 @@ async def sync_context_aware_projections(
         select(Player).where(Player.platform == league.platform, Player.platform_player_id.in_(rostered_player_ids))
     )
     players_by_id = {p.platform_player_id: p for p in result.scalars()}
+    # Injury/availability for same-position teammates, scoped to this league's already-rostered
+    # players (player_to_gsis and players_by_id are already loaded for exactly that set -- no
+    # new query, no new ingestion). A teammate outside that set (e.g. a true free-agent starter
+    # on ESPN) simply won't appear here; compute_effective_pos_rank treats an unresolved
+    # teammate as available, so it's a silent no-promotion, not a wrong one.
+    availability_by_gsis: dict[str, str] = {
+        gsis_id: classify_availability(players_by_id[pid].injury_status, is_bye=False)
+        for pid, gsis_id in player_to_gsis.items()
+        if pid in players_by_id
+    }
 
     result = await session.execute(
         select(PlayerSeasonBaseline).where(
@@ -334,6 +350,7 @@ async def sync_context_aware_projections(
 
     as_of_date = _week_as_of_date(schedule, season, before_week)
     roles_batch = load_current_roles_batch(depth_charts, as_of_date) if as_of_date is not None else {}
+    teammate_groups = load_same_position_groups(depth_charts, as_of_date) if as_of_date is not None else {}
     share_priors_by_rank = (
         compute_share_priors_by_rank(combined_with_shares, depth_charts, season=season, before_week=before_week, as_of_date=as_of_date)
         if as_of_date is not None else {}
@@ -392,6 +409,29 @@ async def sync_context_aware_projections(
             if role is None:
                 fallback_confidence = "low" if roles_batch else "unknown"
                 role = RoleInfo(pos_rank=None, role_confidence=fallback_confidence, role_changed_recently=False)
+
+            # role.pos_rank stays the untouched, real nflverse depth-chart rank -- projection_role
+            # is a separate, additively-derived value, never a mutation of role/roles_batch.
+            projection_role = role
+            room = teammate_groups.get((current_team, player.position), [])
+            if room:
+                teammates = [
+                    TeammateStatus(
+                        gsis_id=teammate_gsis_id,
+                        pos_rank=roles_batch[(teammate_gsis_id, player.position)].pos_rank
+                        if (teammate_gsis_id, player.position) in roles_batch else None,
+                        availability_status=availability_by_gsis.get(teammate_gsis_id, "healthy"),
+                    )
+                    for teammate_gsis_id in room
+                ]
+                effective_rank = compute_effective_pos_rank(gsis_id, role.pos_rank, teammates)
+                if effective_rank != role.pos_rank:
+                    projection_role = RoleInfo(
+                        pos_rank=effective_rank,
+                        role_confidence=role.role_confidence,
+                        role_changed_recently=role.role_changed_recently,
+                    )
+
             qb_context = qb_context_by_team.get(current_team)
             if qb_context is not None:
                 # No QB-change workload discount -- a directional test found no consistent effect
@@ -403,7 +443,7 @@ async def sync_context_aware_projections(
                 tendencies = team_tendencies_v2.get(current_team, TeamTendencies(None, None))
                 breakdown_new = project_context_aware_points_detailed_v2(
                     player.position, current_games, prior_games or None, career_prior, career_seasons,
-                    tendencies, role, qb_context, share_priors_by_rank, position_priors.get(player.position, {}),
+                    tendencies, projection_role, qb_context, share_priors_by_rank, position_priors.get(player.position, {}),
                     current_team=current_team, prior_season_team=prior_season_team,
                     platform_points=None, availability_status="healthy", scoring_rules=scoring_rules,
                 )
