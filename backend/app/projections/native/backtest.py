@@ -10,13 +10,7 @@ MODEL_HISTORICAL = "historical_recency"
 
 
 def _index_games_by_player_season(df: pd.DataFrame) -> dict[tuple, list[dict]]:
-    """Materializes every (player_id, season) REG-season game list exactly once, instead of
-    re-filtering + to_dict("records")-ing the full (often 100+ column) weekly_stats frame per
-    player per week -- pandas' to_dict("records") is the dominant cost on a wide frame, and a
-    full-season backtest calls the old per-lookup version thousands of times. Grouping is applied
-    identically, so results are byte-identical to the old per-lookup approach; this is purely a
-    performance change.
-    """
+    """Pure performance change: materializes each (player_id, season) game list once instead of re-filtering per lookup."""
     regular_season = df[df["season_type"] == "REG"].sort_values("week")
     grouped: dict[tuple, list[dict]] = {}
     # One large to_dict("records") call, then group in plain Python -- pandas' to_dict("records")

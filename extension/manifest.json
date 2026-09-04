@@ -3,9 +3,10 @@
   "name": "Gridlytics",
   "version": "0.1.0",
   "description": "Fantasy football analytics for Sleeper and ESPN leagues",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
-    "http://127.0.0.1:8001/*",
     "https://gridlytics-production.up.railway.app/*",
     "https://fantasy.espn.com/*",
     "https://lm-api-reads.fantasy.espn.com/*"
@@ -23,7 +24,9 @@
         "https://sleeper.app/leagues/*",
         "https://fantasy.espn.com/football/*"
       ],
-      "js": ["content.js"]
+      "js": [
+        "content.js"
+      ]
     }
   ]
 }

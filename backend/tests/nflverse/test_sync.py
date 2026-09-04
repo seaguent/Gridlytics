@@ -634,14 +634,7 @@ async def test_sync_usage_stats_gridlytics_projection_is_idempotent(db_session):
 @pytest.mark.asyncio
 @respx.mock
 async def test_effective_role_promotes_backup_rb_when_starter_ruled_out(db_session):
-    """Real, DB-backed proof that the effective-role mechanism fires through the actual
-    production entrypoint (sync_usage_stats), not just in isolated unit tests. RB1
-    (00-0011111) is SF's real depth-chart rank-1 RB with real week-1 rushing stats already in
-    the shared fixtures. RB2 (00-0022222) is added here as SF's rank-2 backup with zero own
-    history. A third player (00-0044444, KC) is added purely to seed a real rank-2 share prior,
-    so both scenarios resolve through the context-aware model -- never native fallback -- making
-    this an apples-to-apples comparison of the SAME model, differing only by which rank RB2 is
-    evaluated at."""
+    """Proves the effective-role mechanism fires through the real production entrypoint, not just isolated unit tests."""
     league = await _make_league(db_session, "sleeper")
     league.current_week = 2
     await _add_rostered_player(db_session, league, "00-0011111")

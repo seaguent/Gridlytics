@@ -159,9 +159,7 @@ async def resync_sleeper_league(
     league: League = Depends(get_current_league),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, str]:
-    """Explicit full-resync escape hatch for debugging/recovery -- bypasses the normal
-    already-synced-week skip so every historical week gets re-fetched from Sleeper. Not wired
-    into any UI; call directly when a league's historical data needs to be forced fresh."""
+    """Bypasses the already-synced-week skip; not wired into any UI, call directly when needed."""
     if league.platform != "sleeper":
         raise HTTPException(status_code=400, detail="This league is not a Sleeper league")
 

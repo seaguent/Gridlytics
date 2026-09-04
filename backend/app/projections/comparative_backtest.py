@@ -30,10 +30,7 @@ def run_comparative_backtest(
     season: int,
     weeks: list[int],
 ) -> list[dict]:
-    """Returns one row per (player, week, model) for every eligible player-week, for all four
-    models -- including an explicit row with projected=None when a model abstains, rather than
-    silently dropping it. This is what makes coverage/abstention reportable at all: a model that
-    quietly skips difficult cases must not look identical to one with nothing to say about them."""
+    """Includes an explicit row with projected=None on abstention, rather than silently dropping it."""
     weekly_with_shares = add_share_columns(weekly_stats)
     regular_season = weekly_with_shares[weekly_with_shares["season_type"] == "REG"]
     rows: list[dict] = []
@@ -144,8 +141,7 @@ def summarize_accuracy(rows: list[dict]) -> pd.DataFrame:
 
 
 def summarize_segment(rows: list[dict], segment_column: str) -> pd.DataFrame:
-    """Generic segment breakdown (e.g. team_changed, role_changed_recently), MAE/RMSE/sample_size
-    per (model, segment value), scored rows only."""
+    """Scored rows only."""
     if not rows:
         return pd.DataFrame(columns=["model", segment_column, "mae", "rmse", "sample_size"])
 
@@ -178,8 +174,7 @@ def summarize_coverage(rows: list[dict]) -> pd.DataFrame:
 
 
 def summarize_abstention_reasons(rows: list[dict], model: str) -> pd.DataFrame:
-    """For a given model's abstained rows only, breaks down by role_confidence -- the closest
-    real, honest signal available for *why* the context-aware model had nothing to say."""
+    """role_confidence is the closest available signal for why the model abstained."""
     df = pd.DataFrame(rows)
     abstained = df[(df["model"] == model) & df["projected"].isna()]
     if abstained.empty:
@@ -205,9 +200,7 @@ def common_sample_comparison(rows: list[dict], model_a: str, model_b: str) -> pd
 
 
 def pairwise_ranking_accuracy(rows: list[dict], model: str) -> dict:
-    """For every same-position, same-week pair of real players where `model` produced a real
-    (non-abstained) projection for both, does its relative ordering match the real outcome?
-    Pairs with a tied real outcome carry no ranking signal and are excluded."""
+    """Pairs with a tied real outcome carry no ranking signal and are excluded."""
     df = pd.DataFrame(rows)
     model_rows = df[(df["model"] == model) & df["projected"].notna()]
 

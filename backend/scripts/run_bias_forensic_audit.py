@@ -35,9 +35,7 @@ def _component_rows_for_category(
     shrunk_rates: dict[str, float],
     actual_row: dict,
 ) -> list[dict]:
-    """Real per-component rows (opportunity + each raw stat) for one player-week-model-category.
-    Abstains (None expected_opportunities, or a rate missing from shrunk_rates because its own
-    effective_value was None) are skipped entirely -- never fabricated as a zero projection."""
+    """Abstains are skipped entirely -- never fabricated as a zero projection."""
     if expected_opportunities is None:
         return []
 

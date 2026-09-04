@@ -87,10 +87,7 @@ def compute_team_tendencies_v2(
     season: int,
     before_week: int | None,
 ) -> dict[str, TeamTendencies]:
-    """Same blend-by-current-season-games-observed mechanism as compute_team_tendencies, but the
-    "prior" side is the multi-year team prior (team_prior.py's compute_team_prior -- recency-
-    weighted multi-season history) instead of a single most-recent season. compute_team_tendencies
-    itself is left unmodified for callers that still want the single-season baseline."""
+    """Same blend mechanism as compute_team_tendencies, but the prior is the multi-year team_prior, not a single season."""
     result: dict[str, TeamTendencies] = {}
 
     if not weekly_stats.empty:

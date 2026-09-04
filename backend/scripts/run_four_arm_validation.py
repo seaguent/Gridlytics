@@ -52,10 +52,7 @@ def run_four_arm_backtest(
     weeks: list[int],
     multi_year_team_prior_by_team: dict[str, TeamPrior],
 ) -> list[dict]:
-    """One row per (player, week, model) for all four arms, matching comparative_backtest.py's
-    existing row shape exactly (model/projected/actual/position/experience_status/team_changed/
-    role_changed_recently) plus two new columns (qb_changed, established_veteran) so the existing
-    summarize_* helpers work unmodified, and the two new segments this phase needs are available."""
+    """Matches comparative_backtest.py's row shape plus two new columns, so summarize_* helpers work unmodified."""
     weekly_with_shares = add_share_columns(weekly_stats)
     regular_season = weekly_with_shares[weekly_with_shares["season_type"] == "REG"]
     indexed_games = _index_games_by_player_season(weekly_with_shares)

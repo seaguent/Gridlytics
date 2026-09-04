@@ -13,10 +13,7 @@ class TeammateStatus:
 
 
 def load_same_position_groups(depth_charts: pd.DataFrame, as_of_date: str) -> dict[tuple[str, str], list[str]]:
-    """Groups the same leak-safe depth-chart snapshot load_current_roles_batch uses by
-    (team, position) -> the gsis_ids sharing that room. Reuses the exact same snapshot-selection
-    helper so "who's currently a teammate" is always drawn from the same real, already-fetched
-    nflverse data -- no new ingestion, no separate source of truth."""
+    """(team, position) -> gsis_ids sharing that room, from the same snapshot load_current_roles_batch uses."""
     snapshot = _latest_snapshot_before(depth_charts, as_of_date)
     if snapshot.empty:
         return {}
@@ -32,16 +29,7 @@ def compute_effective_pos_rank(
     original_pos_rank: int | None,
     teammates: list[TeammateStatus],
 ) -> int | None:
-    """Re-ranks a player among only the currently-available (not "unavailable") same-position
-    teammates, preserving the original relative order from nflverse's own depth-chart rank --
-    never inventing a new ranking signal. "Questionable"/"doubtful" do not trigger a promotion,
-    only "unavailable" does (bye or an OUT-class injury status, per classify_availability).
-
-    Falls back to original_pos_rank whenever there isn't enough real data to safely recompute:
-    no original rank, this player missing from the teammate group, or every teammate's own rank
-    unresolved. A teammate whose availability we simply don't know is treated as available
-    (never promoted away from) -- absence of evidence that someone is out is not evidence they
-    are out."""
+    """Only "unavailable" teammates trigger a promotion; unknown availability is treated as available, never promoted away from."""
     if original_pos_rank is None:
         return None
 

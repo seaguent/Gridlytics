@@ -57,9 +57,7 @@ def compute_team_prior(seasons: list[TeamSeason]) -> TeamPrior:
 
 
 def real_team_seasons(weekly_by_year: dict[int, pd.DataFrame]) -> dict[tuple[str, int], TeamSeason]:
-    """One real TeamSeason per (team, season), season_offset left at 0 -- callers reassign offset
-    relative to whichever target season they're predicting. Shared by the live production sync
-    and every team-prior validation/backtest script."""
+    """season_offset left at 0 -- callers reassign it relative to whichever target season they're predicting."""
     result: dict[tuple[str, int], TeamSeason] = {}
     for season, df in weekly_by_year.items():
         reg = df[df["season_type"] == "REG"]
@@ -83,8 +81,7 @@ def real_team_seasons(weekly_by_year: dict[int, pd.DataFrame]) -> dict[tuple[str
 def build_team_seasons_for_prediction(
     all_team_seasons: dict[tuple[str, int], TeamSeason], team: str, target_season: int, lookback: int,
 ) -> list[TeamSeason]:
-    """Leak-safe: only real seasons strictly before target_season, most recent first
-    (season_offset=0)."""
+    """Leak-safe: only real seasons strictly before target_season, most recent first."""
     available = sorted(
         (s for (t, s) in all_team_seasons if t == team and target_season - lookback <= s < target_season),
         reverse=True,
@@ -103,8 +100,7 @@ def compute_team_prior_by_team(
     weekly_by_year: dict[int, pd.DataFrame], target_season: int,
     lookback: int = LOOKBACK_SEASONS, decay: float = RECENCY_DECAY,
 ) -> dict[str, TeamPrior]:
-    """The multi-year team prior for every team with real history -- one call, used identically
-    by the live sync and by the validation/backtest scripts."""
+    """The multi-year team prior for every team with real history."""
     all_team_seasons = real_team_seasons(weekly_by_year)
     teams = sorted({t for (t, s) in all_team_seasons})
     weight_fn = lambda offset, g, d=decay: team_weight(offset, g, recency_decay=d)

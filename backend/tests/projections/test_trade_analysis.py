@@ -180,11 +180,7 @@ async def test_compute_trade_analysis_computes_real_deltas_for_both_sides(db_ses
 
 
 async def _run_trade_with_lineup(db_session, suffix: str, suboptimal: bool) -> dict:
-    """Same-shaped roster, same trade -- only which player is actually marked as_starter changes.
-    current_starter (10.0) is the real optimal WR; bench_player (6.0) is worse. suboptimal=True
-    marks the WORSE player as the actual starter (a real lineup-setting mistake); suboptimal=False
-    marks the better one, matching what the optimizer would have picked anyway. suffix keeps
-    player/team ids unique so both scenarios can run against the same db_session."""
+    """Same-shaped roster, same trade -- only which player is marked as_starter changes."""
     league, my_team, other_team = await _make_league_with_two_teams(db_session)
     league.roster_positions = ["WR", "BN"]
     await _add_player(
@@ -207,9 +203,7 @@ async def _run_trade_with_lineup(db_session, suffix: str, suboptimal: bool) -> d
 @pytest.mark.asyncio
 @respx.mock
 async def test_compute_trade_analysis_delta_is_invariant_to_a_suboptimal_actual_lineup(db_session):
-    """The core regression case: the trade delta must isolate the trade's own value. Whether the
-    manager actually started their best player or not is a separate, real problem (Start/Sit
-    already surfaces it) -- it must never change the reported trade delta."""
+    """The trade delta must isolate the trade's own value regardless of the manager's actual lineup mistakes."""
     _mock_empty_schedule()
     optimal_actual_lineup = await _run_trade_with_lineup(db_session, "a", suboptimal=False)
     suboptimal_actual_lineup = await _run_trade_with_lineup(db_session, "b", suboptimal=True)
@@ -238,10 +232,7 @@ async def test_compute_trade_analysis_delta_is_invariant_to_a_suboptimal_actual_
 @pytest.mark.asyncio
 @respx.mock
 async def test_compute_trade_analysis_rest_of_season_uses_neutral_rate_and_respects_byes(db_session):
-    """The core fix: a player having a bad-matchup/low current-week number must NOT have that
-    low number carried forward into future weeks -- future weeks use the matchup-neutral
-    gridlytics_base rate instead, and exclude a player entirely in a week his real team is on
-    bye (derived from the real schedule, not guessed)."""
+    """A low current-week number must not carry into future weeks -- those use the matchup-neutral rate instead."""
     league = League(
         platform="sleeper", platform_league_id="1", season="2026", name="L", status="in_season",
         current_week=2, playoff_week_start=4, roster_positions=["RB", "BN"],
@@ -312,10 +303,7 @@ async def test_compute_trade_analysis_rest_of_season_uses_neutral_rate_and_respe
 @pytest.mark.asyncio
 @respx.mock
 async def test_compute_trade_analysis_includes_kicker_and_defense_in_roster_totals(db_session):
-    """POSITION_CATEGORIES (QB/RB/WR/TE only) governs whether a context-aware gridlytics_base
-    gets attempted -- it must never gate whether a player counts toward the roster at all. K/DEF
-    have no rate model, but still contribute their real platform projection, exactly like
-    Start/Sit and Rankings already treat them."""
+    """POSITION_CATEGORIES must never gate roster membership -- K/DEF still count via their platform projection."""
     league, my_team, other_team = await _make_league_with_two_teams(db_session)
     league.roster_positions = ["WR", "K", "DEF", "BN"]
     await _add_player(db_session, league, my_team, "my_wr", "WR", "My WR", 10.0)

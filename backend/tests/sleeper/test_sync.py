@@ -206,9 +206,7 @@ async def test_refresh_league_syncs_projections_for_rostered_players(db_session)
 async def test_refresh_league_skips_a_completed_past_week_but_keeps_resyncing_current_and_incomplete_weeks(
     db_session,
 ):
-    """current_week (leg)=3, playoff_week_start=4 -> weeks 1, 2, 3 are attempted. Week 1 gets a
-    real matchup on the first sync (becomes "complete"); week 2 gets an empty response (creates no
-    Matchup row, stays "incomplete"); week 3 is the current week."""
+    """current_week=3: week 1 completes normally, week 2 gets an empty response and stays incomplete."""
     league_id = "123"
     _mock_league_with_current_week(league_id, leg=3, playoff_week_start=4)
 
@@ -260,8 +258,7 @@ async def test_refresh_league_force_full_resync_reprocesses_completed_weeks(db_s
 @pytest.mark.asyncio
 @respx.mock
 async def test_refresh_league_skipping_a_complete_week_leaves_its_stored_data_unchanged(db_session):
-    """The skip must never change what's already stored -- a skipped week's real WeeklyScore data
-    from the first sync must still be there, untouched, after a second refresh that skips it."""
+    """The skip must never change what's already stored."""
     league_id = "123"
     _mock_league_with_current_week(league_id, leg=3, playoff_week_start=4)
 

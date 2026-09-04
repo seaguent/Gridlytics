@@ -21,9 +21,7 @@ def evaluate_lookback_and_decay(
     lookback_candidates: list[int],
     decay_candidates: list[float],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (summary_by_lookback_and_decay, raw_per_player_rows). The raw rows carry
-    seasons_used and actual/predicted per player so Task 9's subgroup checks (elite-player MAE,
-    established-veteran signed bias) can filter them directly without any new fetching."""
+    """Raw rows carry seasons_used and actual/predicted so subgroup checks can filter without refetching."""
     held_out_df = season_stats_by_year.get(held_out_season)
     if held_out_df is None or held_out_df.empty:
         return pd.DataFrame(), pd.DataFrame()

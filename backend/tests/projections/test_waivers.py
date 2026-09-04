@@ -272,11 +272,7 @@ async def test_compute_waiver_recommendations_runs_lineup_comparison_when_team_s
 @pytest.mark.asyncio
 @respx.mock
 async def test_compute_waiver_recommendations_treats_a_bench_kicker_as_a_legal_drop_candidate(db_session):
-    """POSITION_CATEGORIES (QB/RB/WR/TE) must gate whether a context-aware gridlytics_base gets
-    attempted, never whether a player counts toward the roster at all. This roster's ONLY bench
-    player is a backup kicker -- if K/DEF get silently dropped from roster_candidates, that bench
-    kicker becomes invisible, no legal drop exists, and the recommendation disappears entirely
-    even though upgrading the WR slot is obviously worth benching the backup kicker for."""
+    """POSITION_CATEGORIES must never gate roster membership -- this roster's only bench player is a kicker."""
     league = League(
         platform="sleeper", platform_league_id="123", season="2026", name="L", status="in_season",
         current_week=2, roster_positions=["WR", "K", "DEF", "BN"], scoring_settings={"rec": 1.0},
@@ -351,9 +347,7 @@ async def test_compute_waiver_recommendations_treats_a_bench_kicker_as_a_legal_d
 @pytest.mark.asyncio
 @respx.mock
 async def test_compute_waiver_recommendations_runs_lineup_comparison_for_espn_league(db_session):
-    """Proves the ESPN free-agent pool flows through the exact same rank/score/simulate engine
-    Sleeper uses -- only the candidate source (EspnAvailablePlayerProvider vs.
-    SleeperAvailablePlayerProvider) differs."""
+    """Proves ESPN flows through the same rank/score/simulate engine as Sleeper -- only the candidate source differs."""
     league = League(
         platform="espn", platform_league_id="1", season="2026", name="L", status="in_season",
         current_week=2, roster_positions=["WR", "BN"],
@@ -481,11 +475,7 @@ async def test_waiver_recommendation_shape_matches_between_sleeper_and_espn(db_s
 @pytest.mark.asyncio
 @respx.mock
 async def test_free_agent_rb2_effective_role_promotion_when_rostered_rb1_ruled_out(db_session):
-    """Real, DB-backed proof the effective-role mechanism reuses cleanly for Waivers free-agent
-    candidates: RB2 is a free agent (not rostered by anyone), SF's real depth-chart rank-2 back.
-    RB1 is SF's rostered rank-1 starter. A KC backup exists purely to seed a real (diluted) rank-2
-    share prior so both runs resolve through the context-aware model. Only RB1's injury_status
-    changes between the two calls."""
+    """Proves the effective-role mechanism reuses cleanly for Waivers free-agent candidates."""
     league = League(
         platform="sleeper", platform_league_id="123", season="2026", name="L", status="in_season",
         current_week=2, roster_positions=["QB", "RB", "WR", "TE", "FLEX", "BN"],
@@ -660,12 +650,7 @@ def _espn_rb2_free_agent_payload() -> dict:
 @pytest.mark.asyncio
 @respx.mock
 async def test_espn_free_agent_rb2_effective_role_promotion_when_rostered_rb1_ruled_out(db_session):
-    """ESPN equivalent of the Sleeper injury-aware effective-role waiver test above. RB1 (ESPN id
-    111) is SF's rostered rank-1 starter -- a real Player row from this league's normal roster
-    sync, no gsis_id column (ESPN never persists one). RB2 (ESPN id 222) is a free agent, SF's
-    real rank-2 backup. The crosswalk compute_waiver_recommendations now builds once is what lets
-    it resolve both RB2's own identity AND RB1's gsis_id for the teammate-availability lookup --
-    this is the exact gap that was closed."""
+    """ESPN equivalent of the Sleeper injury-aware effective-role waiver test above."""
     league = _espn_effective_role_league()
     connection = LeagueConnection(league_id=0, access_token_hash="x", my_team_id=None)
 
@@ -705,9 +690,7 @@ async def test_espn_free_agent_rb2_effective_role_promotion_when_rostered_rb1_ru
 @pytest.mark.asyncio
 @respx.mock
 async def test_espn_waiver_request_loads_the_crosswalk_exactly_once(db_session):
-    """Regression test for the refactor itself: compute_waiver_recommendations must reuse the
-    SAME crosswalk load for both the free-agent provider and the teammate-availability lookup,
-    never fetching /players.csv a second time in the same request."""
+    """compute_waiver_recommendations must reuse one crosswalk load, never fetching /players.csv twice."""
     league = _espn_effective_role_league()
     connection = LeagueConnection(league_id=0, access_token_hash="x", my_team_id=None)
 

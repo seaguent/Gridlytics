@@ -33,9 +33,7 @@ def compute_final_projection(
 
 
 async def fetch_platform_only_projections(session: AsyncSession, league: League) -> dict[str, float]:
-    """The single real platform's own projection (ESPN's or Sleeper's, whichever this league
-    is) -- deliberately not the multi-source ensemble, since the blend needs the platform's own
-    number specifically, not one already averaged with our historical-average provider."""
+    """The platform's own projection, not the multi-source ensemble -- the blend needs this number specifically."""
     provider = ESPNProjectionProvider() if league.platform == "espn" else SleeperProjectionProvider()
     projections = await provider.get_projections(session, league)
     return {p.platform_player_id: p.projected_points for p in projections}

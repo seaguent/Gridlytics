@@ -25,9 +25,7 @@ async def fetch_season_stats_range(
 def build_career_seasons(
     season_stats_by_year: dict[int, pd.DataFrame], gsis_id: str, held_out_season: int
 ) -> list[CareerSeason]:
-    """Leak-safe career-season history for one player: only seasons strictly before
-    `held_out_season`, most recent first (season_offset=0). Shared by both the live production
-    sync and every validation/backtest script."""
+    """Leak-safe: only seasons strictly before `held_out_season`, most recent first."""
     available = sorted(
         (season for season in season_stats_by_year if season < held_out_season), reverse=True
     )

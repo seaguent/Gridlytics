@@ -45,11 +45,7 @@ class ContextAwareBreakdown:
 
 
 def add_share_columns(weekly_stats: pd.DataFrame) -> pd.DataFrame:
-    """Adds receiving_share/rushing_share/passing_share to every row, derived from real team
-    totals per (team, season, week). Must be called on the full multi-player DataFrame BEFORE
-    slicing into per-player game-dict lists -- a single player's own row has no way to know their
-    team's total carries/attempts that week on its own.
-    """
+    """Must be called on the full multi-player DataFrame before slicing into per-player lists."""
     result = weekly_stats.copy()
     result["receiving_share"] = result["target_share"]
     for category_name, volume_col in SHARE_VOLUME_COLUMN.items():
@@ -117,11 +113,7 @@ def project_context_aware_points_detailed(
     availability_status: str,
     scoring_rules: ScoringRules = STANDARD_PPR,
 ) -> ContextAwareBreakdown | None:
-    """position_efficiency_priors is the native model's compute_all_position_priors(...)[position]
-    -- position-wide (not rank-specific) efficiency rate priors (yards_per_target, td_rate, etc.).
-    share_priors_by_rank supplies the SHARE priors only (receiving/rushing/passing fractions) --
-    these are two genuinely different prior sources and must not be conflated into one dict.
-    """
+    """position_efficiency_priors and share_priors_by_rank are different prior sources -- must not be conflated."""
     categories = POSITION_CATEGORIES.get(position)
     if not categories:
         return None

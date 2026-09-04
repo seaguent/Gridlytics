@@ -300,11 +300,7 @@ async def sync_context_aware_projections(
     rostered_player_ids: set[str],
     player_to_gsis: dict[str, str],
 ) -> None:
-    """The context-aware model (career prior + team/QB context) is the live "gridlytics" source.
-    The native model is kept and computed alongside purely as a documented fallback -- for the
-    rare rostered player the context-aware model has no real evidence to project at all (e.g. an
-    unknown depth-chart rank with zero career and zero current-season history), never as the
-    primary model."""
+    """The native model is kept only as a fallback for players the context-aware model has no evidence for."""
     combined = pd.concat([prior_weekly_stats, weekly_stats], ignore_index=True) if not prior_weekly_stats.empty else weekly_stats
     if combined.empty:
         # No real nflverse data of any kind -- never fabricate an all-zero projection.

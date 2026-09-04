@@ -53,14 +53,7 @@ def load_current_role(
 def load_current_roles_batch(
     depth_charts: pd.DataFrame, as_of_date: str
 ) -> dict[tuple[str, str], RoleInfo]:
-    """Same leak-safe snapshot selection and role-change detection as load_current_role, but
-    computes the two relevant snapshots (cutoff + lookback) ONCE for a shared as_of_date and
-    returns every (gsis_id, position) pair found, instead of re-filtering the full depth_charts
-    DataFrame per player. as_of_date depends only on the prediction week, not the player, so
-    reusing the same two filtered snapshots across every player evaluated for that week is a
-    real, structural optimization, not just a cache -- the single-player function above stays
-    correct and unchanged for callers that only need one player's role.
-    """
+    """Batched load_current_role: computes the shared cutoff+lookback snapshots once per as_of_date instead of per player."""
     snapshot = _latest_snapshot_before(depth_charts, as_of_date)
     if snapshot.empty:
         return {}

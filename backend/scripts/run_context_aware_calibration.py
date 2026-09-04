@@ -27,22 +27,7 @@ def build_and_evaluate_v2(
     depth_charts: pd.DataFrame | None = None,
     week_to_as_of_date: dict[int, str] | None = None,
 ) -> pd.DataFrame:
-    """Real walk-forward evaluation of v2 with a given candidate parameter set. Temporarily
-    monkeypatches the module-level PLACEHOLDER dicts/constants for the duration of this call --
-    isolated per-call, never leaves a mutated global state behind. weekly_stats is real
-    per-game data (current_games, QB pass-attempt inference); season_stats_by_year is real
-    per-season data (CareerSeason construction) -- kept separate on purpose, never conflated.
-
-    depth_charts/week_to_as_of_date default to empty/synthetic when omitted (keeps the unit
-    tests in test_calibration.py minimal and self-contained); real calibration runs (main())
-    pass real nflverse depth-chart data and real schedule-derived dates so share_priors_by_rank
-    actually resolves real role-rank fallbacks -- an empty depth_charts silently collapses
-    EVERY workload fallback to None, which bypasses the workload confidence weight entirely
-    (compute_effective_prior trusts the career value alone when there's no fallback to blend
-    toward) and makes the workload calibration dimension meaningless. Caught via a real first
-    grid-search run where varying workload_full_confidence changed nothing -- confirmed as a
-    harness bug, not a real finding, before trusting any calibration result.
-    """
+    """Monkeypatches module-level PLACEHOLDER constants for this call only -- isolated, never leaves mutated global state."""
     import app.projections.context_aware.model as model_module
     import app.projections.context_aware.conflict as conflict_module
 

@@ -39,9 +39,7 @@ def _teams_playing_by_week(schedule: pd.DataFrame, weeks: list[int]) -> dict[int
 async def _load_roster_players(
     session: AsyncSession, league: League, team_id: int
 ) -> tuple[list[dict], dict[str, str], set[str]]:
-    """Raw per-player ingredients for a roster -- deliberately NOT blended/finalized here, so the
-    caller can apply real current-week availability for the current-week term of the ROS sum and
-    neutral (matchup-agnostic) availability for every future-week term."""
+    """Deliberately not blended -- lets the caller apply current-week vs. neutral availability separately."""
     result = await session.execute(
         select(RosterSlot.platform_player_id, RosterSlot.is_starter).where(
             RosterSlot.team_id == team_id, RosterSlot.week == league.current_week
@@ -108,9 +106,7 @@ def _current_week_candidates(players: list[dict], playing_teams: set[str]) -> li
 
 
 def _neutral_candidates(players: list[dict]) -> list[dict]:
-    """The matchup-neutral Gridlytics base rate, assuming normal availability -- used for every
-    future week. Excludes a player only when there's no real base rate to carry forward at all
-    (missing != zero), never a fabricated fallback to the current-week blended number."""
+    """Excludes a player only when there's no base rate at all (missing != zero) -- never a fabricated fallback."""
     candidates = []
     for p in players:
         if p["gridlytics_base"] is None:

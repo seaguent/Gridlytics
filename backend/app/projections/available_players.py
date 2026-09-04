@@ -82,8 +82,7 @@ class SleeperAvailablePlayerProvider:
 
 
 class EspnAuthError(Exception):
-    """Raised when an ESPN league has no free-agent data because the browser's ESPN session
-    couldn't fetch it (expired login, private league, or the extension never pushed a payload)."""
+    """Raised when the browser's ESPN session couldn't fetch free-agent data (expired login, private league)."""
 
 
 class EspnAvailablePlayerProvider:
