@@ -142,6 +142,26 @@ async def resync_espn_league(
     return {"status": "ok"}
 
 
+@app.post("/leagues/me/resync-sleeper")
+async def resync_sleeper_league(
+    league: League = Depends(get_current_league),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    """Explicit full-resync escape hatch for debugging/recovery -- bypasses the normal
+    already-synced-week skip so every historical week gets re-fetched from Sleeper. Not wired
+    into any UI; call directly when a league's historical data needs to be forced fresh."""
+    if league.platform != "sleeper":
+        raise HTTPException(status_code=400, detail="This league is not a Sleeper league")
+
+    client = SleeperClient()
+    try:
+        await refresh_league(session, client, league.platform_league_id, force_full_resync=True)
+    finally:
+        await client.aclose()
+
+    return {"status": "ok"}
+
+
 @app.get("/leagues/me")
 async def get_league_info(
     league: League = Depends(get_fresh_league),

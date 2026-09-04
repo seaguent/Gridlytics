@@ -124,6 +124,10 @@
   flex-shrink: 0;
 }
 
+.gl-tabs--sub {
+  padding-top: 0;
+}
+
 .gl-tab {
   flex: 1;
   padding: 8px 1px;
@@ -610,4 +614,12 @@
 
 .gl-trade-results {
   margin-top: 12px;
+}
+
+.gl-trade-verdict {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gl-accent);
+  padding: 8px 0;
 }

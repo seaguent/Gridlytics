@@ -695,6 +695,37 @@ def test_team_roster_endpoint_returns_404_for_team_outside_the_league(client):
 
 
 @respx.mock
+def test_resync_sleeper_endpoint_forces_a_full_resync(client):
+    _mock_sleeper_league()
+    connect_response = client.post(
+        "/connections",
+        json={"platform": "sleeper", "platform_league_id": "123", "access_token_hash": hash_token("resync-token")},
+    )
+    assert connect_response.status_code == 200
+
+    response = client.post("/leagues/me/resync-sleeper", headers={"Authorization": "Bearer resync-token"})
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@respx.mock
+def test_resync_sleeper_endpoint_returns_400_for_an_espn_league(client):
+    import copy
+
+    from tests.espn.test_parser import SAMPLE_RAW
+
+    _mock_nflverse_season_not_published("2026")
+    connect_response = client.post(
+        "/connections/espn",
+        json={"raw_league_data": copy.deepcopy(SAMPLE_RAW), "access_token_hash": hash_token("espn-resync-token")},
+    )
+    assert connect_response.status_code == 200
+
+    response = client.post("/leagues/me/resync-sleeper", headers={"Authorization": "Bearer espn-resync-token"})
+    assert response.status_code == 400
+
+
+@respx.mock
 def test_espn_connection_and_resync_flow(client):
     from tests.espn.test_parser import SAMPLE_RAW
 

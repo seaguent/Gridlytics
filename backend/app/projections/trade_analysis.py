@@ -9,7 +9,6 @@ from app.nflverse.client import NflverseClient
 from app.projections.availability import classify_availability
 from app.projections.final_projection import compute_final_projection
 from app.projections.models import PlayerProjection
-from app.projections.native.categories import POSITION_CATEGORIES
 from app.projections.start_sit import build_explanation
 
 
@@ -77,8 +76,12 @@ async def _load_roster_players(
     names_by_id: dict[str, str] = {}
     for pid in player_ids:
         player = players_by_id.get(pid)
-        if player is None or player.position not in POSITION_CATEGORIES:
+        if player is None:
             continue
+        # POSITION_CATEGORIES (QB/RB/WR/TE) governs whether a context-aware gridlytics_base gets
+        # attempted below -- K/DEF have no rate model and simply never get one, same as everyone
+        # else falls back to platform-only when gridlytics_base is missing. It must never gate
+        # whether a player counts toward the roster at all, or K/DEF slots go silently unfilled.
         players.append({
             "player_id": pid,
             "position": player.position,

@@ -310,6 +310,31 @@ async def test_compute_trade_analysis_rest_of_season_uses_neutral_rate_and_respe
 
 
 @pytest.mark.asyncio
+@respx.mock
+async def test_compute_trade_analysis_includes_kicker_and_defense_in_roster_totals(db_session):
+    """POSITION_CATEGORIES (QB/RB/WR/TE only) governs whether a context-aware gridlytics_base
+    gets attempted -- it must never gate whether a player counts toward the roster at all. K/DEF
+    have no rate model, but still contribute their real platform projection, exactly like
+    Start/Sit and Rankings already treat them."""
+    league, my_team, other_team = await _make_league_with_two_teams(db_session)
+    league.roster_positions = ["WR", "K", "DEF", "BN"]
+    await _add_player(db_session, league, my_team, "my_wr", "WR", "My WR", 10.0)
+    await _add_player(db_session, league, my_team, "my_k", "K", "My Kicker", 8.0)
+    await _add_player(db_session, league, my_team, "my_def", "DEF", "My Defense", 7.0)
+    await _add_player(db_session, league, other_team, "their_wr", "WR", "Their WR", 5.0)
+    await db_session.commit()
+    _mock_empty_schedule()
+
+    result = await compute_trade_analysis(
+        db_session, league, my_team.id, other_team.id,
+        give_player_ids=[], receive_player_ids=["their_wr"],
+    )
+
+    # 10.0 (WR) + 8.0 (K) + 7.0 (DEF) = 25.0 -- K/DEF must not be silently dropped.
+    assert result["your_team"]["current_week_before"] == pytest.approx(25.0)
+
+
+@pytest.mark.asyncio
 async def test_compute_trade_analysis_rejects_both_sides_empty(db_session):
     league, my_team, other_team = await _make_league_with_two_teams(db_session)
     await db_session.commit()

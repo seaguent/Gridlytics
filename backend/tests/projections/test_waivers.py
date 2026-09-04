@@ -271,6 +271,85 @@ async def test_compute_waiver_recommendations_runs_lineup_comparison_when_team_s
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_compute_waiver_recommendations_treats_a_bench_kicker_as_a_legal_drop_candidate(db_session):
+    """POSITION_CATEGORIES (QB/RB/WR/TE) must gate whether a context-aware gridlytics_base gets
+    attempted, never whether a player counts toward the roster at all. This roster's ONLY bench
+    player is a backup kicker -- if K/DEF get silently dropped from roster_candidates, that bench
+    kicker becomes invisible, no legal drop exists, and the recommendation disappears entirely
+    even though upgrading the WR slot is obviously worth benching the backup kicker for."""
+    league = League(
+        platform="sleeper", platform_league_id="123", season="2026", name="L", status="in_season",
+        current_week=2, roster_positions=["WR", "K", "DEF", "BN"], scoring_settings={"rec": 1.0},
+    )
+    db_session.add(league)
+    await db_session.flush()
+    team = Team(league_id=league.id, platform_roster_id="1", display_name="My Team")
+    db_session.add(team)
+    await db_session.flush()
+    connection = LeagueConnection(league_id=league.id, access_token_hash="x", my_team_id=team.id)
+
+    db_session.add_all([
+        Player(platform="sleeper", platform_player_id="weak_wr", position="WR", name="Weak WR"),
+        Player(platform="sleeper", platform_player_id="starting_k", position="K", name="Starting Kicker"),
+        Player(platform="sleeper", platform_player_id="bench_k", position="K", name="Bench Kicker"),
+        Player(platform="sleeper", platform_player_id="my_def", position="DEF", name="My Defense"),
+    ])
+    db_session.add_all([
+        RosterSlot(team_id=team.id, week=2, platform_player_id="weak_wr", is_starter=True, points=0),
+        RosterSlot(team_id=team.id, week=2, platform_player_id="starting_k", is_starter=True, points=0),
+        RosterSlot(team_id=team.id, week=2, platform_player_id="bench_k", is_starter=False, points=0),
+        RosterSlot(team_id=team.id, week=2, platform_player_id="my_def", is_starter=True, points=0),
+    ])
+    db_session.add_all([
+        ProjectionRecord(league_id=league.id, platform_player_id="weak_wr", week=2, source="sleeper",
+                          name="Weak WR", position="WR", projected_points=3.0),
+        ProjectionRecord(league_id=league.id, platform_player_id="starting_k", week=2, source="sleeper",
+                          name="Starting Kicker", position="K", projected_points=8.0),
+        ProjectionRecord(league_id=league.id, platform_player_id="bench_k", week=2, source="sleeper",
+                          name="Bench Kicker", position="K", projected_points=2.0),
+        ProjectionRecord(league_id=league.id, platform_player_id="my_def", week=2, source="sleeper",
+                          name="My Defense", position="DEF", projected_points=7.0),
+    ])
+    await db_session.commit()
+
+    respx.get(f"{SLEEPER_BASE_URL}/players/nfl").mock(
+        return_value=httpx.Response(
+            200,
+            json={"fa1": {"position": "WR", "full_name": "Better WR", "gsis_id": "00-100", "team": "KC"}},
+        )
+    )
+    respx.get(f"{SLEEPER_BASE_URL}/league/123/rosters").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"roster_id": 1, "league_id": "123",
+                   "players": ["weak_wr", "starting_k", "bench_k", "my_def"], "settings": {}}],
+        )
+    )
+    respx.get(f"{SLEEPER_PROJECTIONS_BASE_URL}/2026/2").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"player_id": "fa1", "week": 2, "stats": {"pts_ppr": 18.0},
+                   "player": {"first_name": "Better", "last_name": "WR", "position": "WR"}}],
+        )
+    )
+    _mock_empty_nflverse_history("2026")
+
+    result = await compute_waiver_recommendations(db_session, league, connection)
+
+    assert result["mode"] == "lineup_comparison"
+    # A buggy roster load sees no legal drop candidate at all (bench_k is invisible) and silently
+    # excludes fa1 -- recommendations would be empty instead of surfacing this real upgrade.
+    assert len(result["recommendations"]) == 1
+    row = result["recommendations"][0]
+    assert row["platform_player_id"] == "fa1"
+    assert row["replaces_player_id"] == "bench_k"
+    # current_optimal_points = 3.0 (WR) + 8.0 (K) + 7.0 (DEF) = 18.0.
+    # new_optimal_points = 18.0 (fa1) + 8.0 (K) + 7.0 (DEF) = 33.0.
+    assert row["projected_lineup_improvement"] == pytest.approx(15.0)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_compute_waiver_recommendations_runs_lineup_comparison_for_espn_league(db_session):
     """Proves the ESPN free-agent pool flows through the exact same rank/score/simulate engine
     Sleeper uses -- only the candidate source (EspnAvailablePlayerProvider vs.

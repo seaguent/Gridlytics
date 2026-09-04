@@ -390,8 +390,11 @@ async def compute_waiver_recommendations(
     roster_names_by_id = {}
     for pid in roster_player_ids:
         player = roster_players.get(pid)
-        if player is None or player.position not in POSITION_CATEGORIES:
+        if player is None:
             continue
+        # POSITION_CATEGORIES (QB/RB/WR/TE) governs whether a context-aware gridlytics_base gets
+        # attempted below -- it must never gate roster membership itself, or K/DEF slots silently
+        # go unfilled in the lineup-comparison baseline.
         final = compute_final_projection(roster_gridlytics_base.get(pid), roster_platform_projection.get(pid), None)
         if final is None:
             continue

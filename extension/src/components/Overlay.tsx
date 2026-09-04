@@ -48,6 +48,32 @@ type Tab =
   | "waivers"
   | "trades";
 
+type Group = "league" | "myTeam" | "players";
+
+const GROUP_LABELS: Record<Group, string> = {
+  league: "League",
+  myTeam: "My Team",
+  players: "Players",
+};
+
+const GROUP_TABS: Record<Group, { id: Tab; label: string }[]> = {
+  league: [
+    { id: "standings", label: "Standings" },
+    { id: "power", label: "Power Rankings" },
+    { id: "playoffs", label: "Playoffs" },
+    { id: "recap", label: "Recap" },
+  ],
+  myTeam: [
+    { id: "efficiency", label: "Efficiency" },
+    { id: "startSit", label: "Start/Sit" },
+    { id: "waivers", label: "Waivers" },
+    { id: "trades", label: "Trades" },
+  ],
+  players: [{ id: "rankings", label: "Players" }],
+};
+
+const GROUP_ORDER: Group[] = ["league", "myTeam", "players"];
+
 interface ConnectResponse {
   ok: boolean;
   error?: string;
@@ -70,6 +96,12 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>("standings");
+  const [activeGroup, setActiveGroup] = useState<Group>("league");
+  const [lastTabByGroup, setLastTabByGroup] = useState<Record<Group, Tab>>({
+    league: "standings",
+    myTeam: "efficiency",
+    players: "rankings",
+  });
   const [leagueInfo, setLeagueInfo] = useState<LeagueInfo | null>(null);
 
   const [recapWeek, setRecapWeek] = useState<number | null>(null);
@@ -162,6 +194,16 @@ export function Overlay({ league }: { league: OverlayLeague }) {
   }, [token, tab, refreshKey, league, leagueInfo?.current_week]);
 
   const { standings, powerRankings, playoffOdds, efficiency, error } = useAnalytics(token, refreshKey);
+
+  const handleSelectGroup = (group: Group) => {
+    setActiveGroup(group);
+    setTab(lastTabByGroup[group]);
+  };
+
+  const handleSelectTab = (group: Group, tabId: Tab) => {
+    setTab(tabId);
+    setLastTabByGroup((prev) => ({ ...prev, [group]: tabId }));
+  };
 
   const handleSelectTeam = async (teamId: number) => {
     if (!token) return;
@@ -261,61 +303,30 @@ export function Overlay({ league }: { league: OverlayLeague }) {
         {token && (
           <>
             <div className="gl-tabs">
-              <button
-                className={tab === "standings" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("standings")}
-              >
-                Standings
-              </button>
-              <button
-                className={tab === "power" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("power")}
-              >
-                Power Rankings
-              </button>
-              <button
-                className={tab === "playoffs" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("playoffs")}
-              >
-                Playoffs
-              </button>
-              <button
-                className={tab === "efficiency" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("efficiency")}
-              >
-                Efficiency
-              </button>
-              <button
-                className={tab === "recap" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("recap")}
-              >
-                Recap
-              </button>
-              <button
-                className={tab === "rankings" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("rankings")}
-              >
-                Players
-              </button>
-              <button
-                className={tab === "startSit" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("startSit")}
-              >
-                Start/Sit
-              </button>
-              <button
-                className={tab === "waivers" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("waivers")}
-              >
-                Waivers
-              </button>
-              <button
-                className={tab === "trades" ? "gl-tab gl-tab--active" : "gl-tab"}
-                onClick={() => setTab("trades")}
-              >
-                Trades
-              </button>
+              {GROUP_ORDER.map((group) => (
+                <button
+                  key={group}
+                  className={activeGroup === group ? "gl-tab gl-tab--active" : "gl-tab"}
+                  onClick={() => handleSelectGroup(group)}
+                >
+                  {GROUP_LABELS[group]}
+                </button>
+              ))}
             </div>
+
+            {activeGroup !== "players" && (
+              <div className="gl-tabs gl-tabs--sub">
+                {GROUP_TABS[activeGroup].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    className={tab === id ? "gl-tab gl-tab--active" : "gl-tab"}
+                    onClick={() => handleSelectTab(activeGroup, id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {connectError && <div className="gl-error">{connectError}</div>}
 

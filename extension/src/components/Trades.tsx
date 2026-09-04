@@ -95,10 +95,18 @@ function DeltaCard({
         </div>
       )}
       {result.reasons.length > 0 && (
-        <div className="gl-row-stats gl-stat--muted">{result.reasons.join(" · ")}</div>
+        <div className="gl-row-stats gl-stat--muted">Players received: {result.reasons.join(" · ")}</div>
       )}
     </div>
   );
+}
+
+function tradeVerdict(yourDelta: number, theirDelta: number, weeksRemaining: number): string {
+  const diff = yourDelta - theirDelta;
+  const perWeek = weeksRemaining > 0 ? diff / weeksRemaining : diff;
+  if (Math.abs(perWeek) < 0.5) return "Roughly even";
+  if (perWeek > 0) return perWeek < 2 ? "Slightly favors your team" : "Favors your team";
+  return perWeek > -2 ? "Slightly favors their team" : "Favors their team";
 }
 
 export function Trades({
@@ -208,6 +216,13 @@ export function Trades({
 
       {result && (
         <div className="gl-list gl-trade-results">
+          <div className="gl-trade-verdict">
+            {tradeVerdict(
+              result.your_team.rest_of_season_delta,
+              result.other_team.rest_of_season_delta,
+              result.weeks_remaining
+            )}
+          </div>
           <DeltaCard label="Your team" result={result.your_team} weeksRemaining={result.weeks_remaining} />
           <DeltaCard label="Their team" result={result.other_team} weeksRemaining={result.weeks_remaining} />
         </div>
