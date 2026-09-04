@@ -1,4 +1,5 @@
 import { StartSitPlayerRow, StartSitResponse, StartSitSummary } from "../api";
+import { injuryTagClass } from "../injuryStatus";
 import { dominantCategoryLabel, priorSeasonWeightLabel } from "../nativeProjection";
 
 function GridlyticsRow({ row }: { row: StartSitPlayerRow }) {
@@ -69,7 +70,7 @@ function SwapCard({ row }: { row: StartSitPlayerRow }) {
         <span className="gl-action-badge gl-action-badge--swap">START</span>
         <span className="gl-row-name">{row.name}</span>
         {row.injury_status && row.injury_status.toUpperCase() !== "ACTIVE" && (
-          <span className="gl-injury">{row.injury_status}</span>
+          <span className={injuryTagClass(row.injury_status)}>{row.injury_status}</span>
         )}
         <span className="gl-row-record">{row.recommended_slot}</span>
       </div>
@@ -109,7 +110,7 @@ function ConfirmedCard({ row, showSlot }: { row: StartSitPlayerRow; showSlot?: b
         {badge && <span className={`gl-action-badge ${badgeClass}`}>{badge}</span>}
         <span className="gl-row-name">{row.name}</span>
         {row.injury_status && row.injury_status.toUpperCase() !== "ACTIVE" && (
-          <span className="gl-injury">{row.injury_status}</span>
+          <span className={injuryTagClass(row.injury_status)}>{row.injury_status}</span>
         )}
         <span className="gl-row-record">
           {showSlot && row.recommended_slot ? row.recommended_slot : row.position}

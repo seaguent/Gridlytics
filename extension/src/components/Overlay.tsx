@@ -103,6 +103,7 @@ export function Overlay({ league }: { league: OverlayLeague }) {
     players: "rankings",
   });
   const [leagueInfo, setLeagueInfo] = useState<LeagueInfo | null>(null);
+  const [leagueInfoError, setLeagueInfoError] = useState<string | null>(null);
 
   const [recapWeek, setRecapWeek] = useState<number | null>(null);
   const [recap, setRecap] = useState<WeeklyRecap | null>(null);
@@ -133,7 +134,10 @@ export function Overlay({ league }: { league: OverlayLeague }) {
 
   useEffect(() => {
     if (!token) return;
-    fetchLeagueInfo(token).then(setLeagueInfo).catch(() => {});
+    setLeagueInfoError(null);
+    fetchLeagueInfo(token)
+      .then(setLeagueInfo)
+      .catch((err: Error) => setLeagueInfoError(err.message));
   }, [token, refreshKey]);
 
   useEffect(() => {
@@ -329,6 +333,9 @@ export function Overlay({ league }: { league: OverlayLeague }) {
             )}
 
             {connectError && <div className="gl-error">{connectError}</div>}
+            {leagueInfoError && (
+              <div className="gl-error">Couldn't load your league: {leagueInfoError}</div>
+            )}
 
             <div className="gl-body">
               {tab !== "recap" && tab !== "rankings" && tab !== "startSit" && tab !== "waivers" && tab !== "trades" && error && (

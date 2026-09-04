@@ -541,6 +541,16 @@
   letter-spacing: 0.02em;
 }
 
+.gl-injury--out {
+  background: rgba(248, 113, 113, 0.16);
+  color: #f87171;
+}
+
+.gl-injury--questionable {
+  background: rgba(250, 204, 21, 0.18);
+  color: #eab308;
+}
+
 .gl-trade-partner {
   display: flex;
   align-items: center;

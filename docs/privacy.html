@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gridlytics Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e6e6; background: #14161a; }
+    a { color: #7fb2ff; }
+    code { background: #24272e; }
+  }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.25rem; }
+  .updated { color: #767676; font-size: 0.9rem; margin-bottom: 2rem; }
+  code { background: #f1f1f1; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+  ul { padding-left: 1.25rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+
+<h1>Gridlytics Privacy Policy</h1>
+<p class="updated">Last updated: September 4, 2026</p>
+
+<p>
+  Gridlytics is a Chrome extension that adds fantasy football analytics (standings, power rankings,
+  playoff odds, start/sit advice, waiver suggestions, and trade analysis) on top of your existing
+  Sleeper or ESPN fantasy football league. This page explains what data the extension handles and why.
+</p>
+
+<h2>What data Gridlytics accesses</h2>
+<ul>
+  <li>
+    <strong>Sleeper leagues:</strong> your league's public roster, matchup, and settings data, fetched
+    from Sleeper's own public API using the league ID you connect. Sleeper does not require a login for
+    this data.
+  </li>
+  <li>
+    <strong>ESPN leagues:</strong> your league's roster, matchup, and settings data, fetched from ESPN's
+    API using your browser's existing logged-in ESPN session. Gridlytics never sees or stores your ESPN
+    username or password &mdash; it simply reuses the session your browser already has open.
+  </li>
+</ul>
+<p>
+  Gridlytics does not request or store your Sleeper or ESPN account credentials at any point.
+</p>
+
+<h2>How that data is used</h2>
+<p>
+  League and roster data is sent to Gridlytics' backend server, where it's stored and used solely to
+  compute the analytics shown in the extension (standings, projections, rankings, trade and waiver
+  analysis, and similar features). It is not used for any other purpose.
+</p>
+
+<h2>Access tokens</h2>
+<p>
+  When you connect a league, the extension generates a random access token in your browser. Only a
+  one-way cryptographic hash of that token is ever sent to or stored on the Gridlytics backend &mdash;
+  the raw token itself stays in your browser's local storage (<code>chrome.storage.local</code>) and is
+  sent with each request to identify you. This means the backend never has access to a usable copy of
+  your token.
+</p>
+
+<h2>What Gridlytics does not do</h2>
+<ul>
+  <li>No analytics, tracking pixels, or advertising SDKs of any kind are included in the extension or backend.</li>
+  <li>Your data is never sold, rented, or shared with third parties.</li>
+  <li>No data is used for advertising or for purposes unrelated to the analytics features described above.</li>
+</ul>
+
+<h2>Data retention and deletion</h2>
+<p>
+  League data is retained so the extension keeps working across sessions. If you'd like your data
+  deleted, email <a href="mailto:25sean42@gmail.com">25sean42@gmail.com</a> with the league(s) you'd
+  like removed, and it will be deleted from the backend.
+</p>
+
+<h2>Contact</h2>
+<p>
+  Questions about this policy or your data can be sent to
+  <a href="mailto:25sean42@gmail.com">25sean42@gmail.com</a>.
+</p>
+
+<h2>Changes to this policy</h2>
+<p>
+  If this policy changes, the "Last updated" date above will be revised accordingly.
+</p>
+
+</body>
+</html>

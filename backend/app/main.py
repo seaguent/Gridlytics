@@ -1,9 +1,14 @@
-from contextlib import asynccontextmanager
 from dataclasses import replace
 
+import logging
+
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +24,11 @@ from app.analytics.power_rankings import compute_power_rankings
 from app.analytics.recap import generate_weekly_recap
 from app.analytics.roster import compute_bench_points, compute_roster_efficiency, summarize_roster_efficiency
 from app.analytics.standings import compute_expected_wins, compute_schedule_strength
-from app.db import engine
 from app.deps import get_current_connection, get_current_league, get_fresh_league, get_my_team, get_session
 from app.espn.adapter import sync_league as espn_sync_league
 from app.espn.schemas import EspnLeagueResponse
-from app.models import Base, League, LeagueConnection, Player, ProjectionRecord, RosterSlot, Team
+from app.logging_config import configure_logging
+from app.models import League, LeagueConnection, Player, ProjectionRecord, RosterSlot, Team
 from app.nflverse.client import NflverseClient
 from app.nflverse.sync import sync_usage_stats
 from app.projections.accuracy_pipeline import load_projection_accuracy
@@ -40,20 +45,25 @@ from app.projections.uncertainty_pipeline import apply_uncertainty_ranges
 from app.projections.available_players import EspnAuthError
 from app.projections.value import compute_value_over_replacement
 from app.projections.waivers import compute_waiver_recommendations
+from app.rate_limit import limiter
 from app.sleeper.sync import refresh_league
 from app.sleeper.client import SleeperClient
 from app.sleeper.scoring import detect_custom_scoring
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # No Alembic yet (Phase 20) -- create_all only creates missing tables, safe to run every startup.
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
+configure_logging()
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Gridlytics API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
-app = FastAPI(title="Gridlytics API", lifespan=lifespan)
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 
@@ -75,8 +85,9 @@ class ConnectionResponse(BaseModel):
 
 
 @app.post("/connections", response_model=ConnectionResponse)
+@limiter.limit("5/minute")
 async def create_connection(
-    body: ConnectionRequest, session: AsyncSession = Depends(get_session)
+    request: Request, body: ConnectionRequest, session: AsyncSession = Depends(get_session)
 ) -> ConnectionResponse:
     if body.platform != "sleeper":
         raise HTTPException(status_code=400, detail="Unsupported platform")
@@ -99,8 +110,9 @@ class EspnConnectionRequest(BaseModel):
 
 
 @app.post("/connections/espn", response_model=ConnectionResponse)
+@limiter.limit("5/minute")
 async def create_espn_connection(
-    body: EspnConnectionRequest, session: AsyncSession = Depends(get_session)
+    request: Request, body: EspnConnectionRequest, session: AsyncSession = Depends(get_session)
 ) -> ConnectionResponse:
     raw = EspnLeagueResponse.model_validate(body.raw_league_data)
     league = await espn_sync_league(session, raw)

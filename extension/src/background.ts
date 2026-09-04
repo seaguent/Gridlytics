@@ -3,6 +3,9 @@ import { API_BASE_URL } from "./config";
 
 const ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
 
+const NETWORK_ERROR = "Can't reach Gridlytics right now. Check your connection and try again.";
+const ESPN_NETWORK_ERROR = "Can't reach ESPN right now. Check your connection and try again.";
+
 interface ConnectLeagueMessage {
   type: "CONNECT_LEAGUE";
   platform: "sleeper";
@@ -51,22 +54,40 @@ type Message =
   | ApiGetMessage
   | ApiPostMessage;
 
+async function friendlyBackendError(response: Response): Promise<string> {
+  if (response.status === 401) return "Your connection to this league has expired. Try reconnecting.";
+  if (response.status === 429) return "Too many requests -- please wait a moment and try again.";
+  if (response.status >= 500) return "Something went wrong on our end. Please try again in a bit.";
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") return body.detail;
+  } catch {
+    // response body wasn't JSON -- fall through to the generic message
+  }
+  return `Request failed with status ${response.status}`;
+}
+
 async function connectLeague(platformLeagueId: string): Promise<{ ok: boolean; error?: string }> {
   const token = generateToken();
   const accessTokenHash = await sha256Hex(token);
 
-  const response = await fetch(`${API_BASE_URL}/connections`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      platform: "sleeper",
-      platform_league_id: platformLeagueId,
-      access_token_hash: accessTokenHash,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/connections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "sleeper",
+        platform_league_id: platformLeagueId,
+        access_token_hash: accessTokenHash,
+      }),
+    });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
+  }
 
   if (!response.ok) {
-    return { ok: false, error: `Backend returned ${response.status}` };
+    return { ok: false, error: await friendlyBackendError(response) };
   }
 
   await chrome.storage.local.set({
@@ -78,7 +99,12 @@ async function connectLeague(platformLeagueId: string): Promise<{ ok: boolean; e
 
 async function fetchEspnLeague(leagueId: string, season: string): Promise<unknown> {
   const url = `${ESPN_API_BASE}/seasons/${season}/segments/0/leagues/${leagueId}?view=mTeam&view=mRoster&view=mMatchup&view=mSettings`;
-  const response = await fetch(url, { credentials: "include" });
+  let response: Response;
+  try {
+    response = await fetch(url, { credentials: "include" });
+  } catch {
+    throw new Error(ESPN_NETWORK_ERROR);
+  }
   if (!response.ok) {
     throw new Error(`ESPN returned ${response.status} -- is this league private and you're not logged in?`);
   }
@@ -99,14 +125,19 @@ async function connectEspnLeague(
   const token = generateToken();
   const accessTokenHash = await sha256Hex(token);
 
-  const response = await fetch(`${API_BASE_URL}/connections/espn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ raw_league_data: rawLeagueData, access_token_hash: accessTokenHash }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/connections/espn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ raw_league_data: rawLeagueData, access_token_hash: accessTokenHash }),
+    });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
+  }
 
   if (!response.ok) {
-    return { ok: false, error: `Backend returned ${response.status}` };
+    return { ok: false, error: await friendlyBackendError(response) };
   }
 
   await chrome.storage.local.set({
@@ -128,14 +159,19 @@ async function resyncEspnLeague(
     return { ok: false, error: (err as Error).message };
   }
 
-  const response = await fetch(`${API_BASE_URL}/leagues/me/resync-espn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ raw_league_data: rawLeagueData }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/leagues/me/resync-espn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ raw_league_data: rawLeagueData }),
+    });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
+  }
 
   if (!response.ok) {
-    return { ok: false, error: `Backend returned ${response.status}` };
+    return { ok: false, error: await friendlyBackendError(response) };
   }
   return { ok: true };
 }
@@ -149,10 +185,15 @@ async function fetchEspnFreeAgents(leagueId: string, season: string, week: numbe
     },
   };
   const url = `${ESPN_API_BASE}/seasons/${season}/segments/0/leagues/${leagueId}?view=kona_player_info&scoringPeriodId=${week}`;
-  const response = await fetch(url, {
-    credentials: "include",
-    headers: { "X-Fantasy-Filter": JSON.stringify(filter) },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      credentials: "include",
+      headers: { "X-Fantasy-Filter": JSON.stringify(filter) },
+    });
+  } catch {
+    throw new Error(ESPN_NETWORK_ERROR);
+  }
   if (!response.ok) {
     throw new Error(`ESPN returned ${response.status} -- is this league private and you're not logged in?`);
   }
@@ -174,33 +215,43 @@ async function fetchEspnWaivers(
   return apiPost("/leagues/me/waivers", token, { raw_free_agents_data: rawFreeAgentsData });
 }
 
-async function apiGet(
+export async function apiGet(
   path: string,
   token: string
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
+  }
 
   if (!response.ok) {
-    return { ok: false, error: `Request to ${path} failed with status ${response.status}` };
+    return { ok: false, error: await friendlyBackendError(response) };
   }
   return { ok: true, data: await response.json() };
 }
 
-async function apiPost(
+export async function apiPost(
   path: string,
   token: string,
   body: unknown
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, error: NETWORK_ERROR };
+  }
 
   if (!response.ok) {
-    return { ok: false, error: `Request to ${path} failed with status ${response.status}` };
+    return { ok: false, error: await friendlyBackendError(response) };
   }
   return { ok: true, data: await response.json() };
 }

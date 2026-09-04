@@ -1,4 +1,5 @@
 import { RankingRow } from "../api";
+import { injuryTagClass } from "../injuryStatus";
 import { dominantCategoryLabel, priorSeasonWeightLabel } from "../nativeProjection";
 import { rangeProvenanceText, rangeSourceShortLabel } from "../rangeSource";
 
@@ -45,7 +46,7 @@ export function Rankings({
               <span className="gl-row-rank">{index + 1}</span>
               <span className="gl-row-name">{row.name}</span>
               {row.injury_status && row.injury_status.toUpperCase() !== "ACTIVE" && (
-                <span className="gl-injury">{row.injury_status}</span>
+                <span className={injuryTagClass(row.injury_status)}>{row.injury_status}</span>
               )}
               <span className="gl-row-record">{row.position}</span>
             </div>
