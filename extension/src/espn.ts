@@ -3,6 +3,14 @@ export interface EspnLeagueInfo {
   season: string;
 }
 
+// The NFL season is named for the year it starts (a season starting Sept 2026 runs into early
+// 2027). Treat August onward as the new season having started; before that, it's still last year's.
+function currentNflSeason(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  return String(now.getUTCMonth() >= 7 ? year : year - 1);
+}
+
 export function extractEspnLeagueInfo(url: string): EspnLeagueInfo | null {
   let parsed: URL;
   try {
@@ -16,10 +24,13 @@ export function extractEspnLeagueInfo(url: string): EspnLeagueInfo | null {
   }
 
   const leagueId = parsed.searchParams.get("leagueId");
-  const season = parsed.searchParams.get("seasonId");
-  if (!leagueId || !season) {
+  if (!leagueId) {
     return null;
   }
+
+  // ESPN's own site doesn't always include seasonId in the URL (e.g. some "My Team" links) --
+  // fall back to the current NFL season instead of failing to detect the page at all.
+  const season = parsed.searchParams.get("seasonId") ?? currentNflSeason();
 
   return { leagueId, season };
 }

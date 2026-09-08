@@ -178,6 +178,44 @@ async def test_sync_usage_stats_persists_prior_season_baseline(db_session):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_sync_usage_stats_tolerates_a_preexisting_duplicate_baseline_row(db_session):
+    from app.models import PlayerSeasonBaseline
+
+    league = await _make_league(db_session, "espn")
+    await _add_rostered_player(db_session, league, "4426515")
+    _mock_nflverse()
+    respx.get(f"{NFLVERSE_RELEASES_BASE_URL}/stats_player/stats_player_reg_2023.csv").mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                "player_id,player_display_name,position,recent_team,target_share\n"
+                "00-0039075,Puka Nacua,WR,LA,0.27\n"
+            ),
+        )
+    )
+
+    db_session.add(
+        PlayerSeasonBaseline(platform="espn", platform_player_id="4426515", season="2023", team="LA", target_share=0.20)
+    )
+    db_session.add(
+        PlayerSeasonBaseline(platform="espn", platform_player_id="4426515", season="2023", team="LA", target_share=0.21)
+    )
+    await db_session.commit()
+
+    client = NflverseClient()
+    await sync_usage_stats(db_session, client, league)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(PlayerSeasonBaseline).where(PlayerSeasonBaseline.platform_player_id == "4426515").order_by(PlayerSeasonBaseline.id)
+    )
+    rows = result.scalars().all()
+    assert len(rows) == 2
+    assert rows[0].target_share == 0.27
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_sync_usage_stats_matches_sleeper_player_by_own_gsis_id_first(db_session):
     league = await _make_league(db_session, "sleeper")
     await _add_rostered_player(db_session, league, "9075")

@@ -174,13 +174,15 @@ async def sync_player_season_baseline(
 
         for platform_player_id in gsis_to_players[gsis_id]:
             result = await session.execute(
-                select(PlayerSeasonBaseline).where(
+                select(PlayerSeasonBaseline)
+                .where(
                     PlayerSeasonBaseline.platform == league.platform,
                     PlayerSeasonBaseline.platform_player_id == platform_player_id,
                     PlayerSeasonBaseline.season == prior_season,
                 )
+                .order_by(PlayerSeasonBaseline.id)
             )
-            record = result.scalar_one_or_none()
+            record = result.scalars().first()
             if record is None:
                 session.add(
                     PlayerSeasonBaseline(
@@ -213,14 +215,16 @@ async def _upsert_usage_stats_row(
     fantasy_points_ppr: float | None = None,
 ) -> None:
     result = await session.execute(
-        select(PlayerUsageStats).where(
+        select(PlayerUsageStats)
+        .where(
             PlayerUsageStats.platform == league.platform,
             PlayerUsageStats.platform_player_id == platform_player_id,
             PlayerUsageStats.season == season,
             PlayerUsageStats.week == week,
         )
+        .order_by(PlayerUsageStats.id)
     )
-    record = result.scalar_one_or_none()
+    record = result.scalars().first()
     if record is None:
         session.add(
             PlayerUsageStats(
@@ -249,12 +253,14 @@ async def sync_position_volatility_priors(session: AsyncSession, season: str, we
     priors = compute_position_volatility_priors(weekly_stats)
     for position, (low_ratio, high_ratio, sample_size) in priors.items():
         result = await session.execute(
-            select(PositionVolatilityPrior).where(
+            select(PositionVolatilityPrior)
+            .where(
                 PositionVolatilityPrior.season == season,
                 PositionVolatilityPrior.position == position,
             )
+            .order_by(PositionVolatilityPrior.id)
         )
-        record = result.scalar_one_or_none()
+        record = result.scalars().first()
         if record is None:
             session.add(
                 PositionVolatilityPrior(
@@ -464,14 +470,16 @@ async def sync_context_aware_projections(
         dominant_category = dominant.name if dominant else None
 
         result = await session.execute(
-            select(ProjectionRecord).where(
+            select(ProjectionRecord)
+            .where(
                 ProjectionRecord.league_id == league.id,
                 ProjectionRecord.platform_player_id == platform_player_id,
                 ProjectionRecord.week == league.current_week,
                 ProjectionRecord.source == "gridlytics",
             )
+            .order_by(ProjectionRecord.id)
         )
-        record = result.scalar_one_or_none()
+        record = result.scalars().first()
 
         if record is None:
             session.add(
@@ -505,13 +513,15 @@ async def sync_matchup_context(
     defense_strength = compute_position_defense_strength(weekly_stats)
     for _, row in defense_strength.iterrows():
         result = await session.execute(
-            select(TeamDefenseStrength).where(
+            select(TeamDefenseStrength)
+            .where(
                 TeamDefenseStrength.season == league.season,
                 TeamDefenseStrength.team == row["opponent_team"],
                 TeamDefenseStrength.position == row["position"],
             )
+            .order_by(TeamDefenseStrength.id)
         )
-        record = result.scalar_one_or_none()
+        record = result.scalars().first()
         if record is None:
             session.add(
                 TeamDefenseStrength(
@@ -528,13 +538,15 @@ async def sync_matchup_context(
         week = int(row["week"])
         for team, opponent in ((row["home_team"], row["away_team"]), (row["away_team"], row["home_team"])):
             result = await session.execute(
-                select(TeamMatchup).where(
+                select(TeamMatchup)
+                .where(
                     TeamMatchup.season == league.season,
                     TeamMatchup.week == week,
                     TeamMatchup.team == team,
                 )
+                .order_by(TeamMatchup.id)
             )
-            record = result.scalar_one_or_none()
+            record = result.scalars().first()
             if record is None:
                 session.add(TeamMatchup(season=league.season, week=week, team=team, opponent=opponent))
             else:

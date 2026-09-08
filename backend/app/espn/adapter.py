@@ -19,13 +19,15 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
     league_fields = parse_league(raw)
 
     result = await session.execute(
-        select(League).where(
+        select(League)
+        .where(
             League.platform == "espn",
             League.platform_league_id == league_fields["platform_league_id"],
             League.season == league_fields["season"],
         )
+        .order_by(League.id)
     )
-    league = result.scalar_one_or_none()
+    league = result.scalars().first()
     if league is None:
         league = League(platform="espn", **league_fields)
         session.add(league)
@@ -40,12 +42,14 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
     for team_fields in parse_teams(raw):
         platform_team_id = team_fields.pop("platform_team_id")
         result = await session.execute(
-            select(Team).where(
+            select(Team)
+            .where(
                 Team.league_id == league.id,
                 Team.platform_roster_id == platform_team_id,
             )
+            .order_by(Team.id)
         )
-        team = result.scalar_one_or_none()
+        team = result.scalars().first()
         if team is None:
             team = Team(league_id=league.id, platform_roster_id=platform_team_id, **team_fields)
             session.add(team)
@@ -65,13 +69,15 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
         matchup = matchups_by_key.get(key)
         if matchup is None:
             result = await session.execute(
-                select(Matchup).where(
+                select(Matchup)
+                .where(
                     Matchup.league_id == league.id,
                     Matchup.week == matchup_fields["week"],
                     Matchup.platform_matchup_id == matchup_fields["platform_matchup_id"],
                 )
+                .order_by(Matchup.id)
             )
-            matchup = result.scalar_one_or_none()
+            matchup = result.scalars().first()
             if matchup is None:
                 matchup = Matchup(
                     league_id=league.id,
@@ -83,12 +89,14 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             matchups_by_key[key] = matchup
 
         result = await session.execute(
-            select(WeeklyScore).where(
+            select(WeeklyScore)
+            .where(
                 WeeklyScore.team_id == team.id,
                 WeeklyScore.matchup_id == matchup.id,
             )
+            .order_by(WeeklyScore.id)
         )
-        weekly_score = result.scalar_one_or_none()
+        weekly_score = result.scalars().first()
         if weekly_score is None:
             session.add(
                 WeeklyScore(
@@ -138,13 +146,15 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             (roster_fields["platform_player_id"], league.current_week), 0
         )
         result = await session.execute(
-            select(RosterSlot).where(
+            select(RosterSlot)
+            .where(
                 RosterSlot.team_id == team.id,
                 RosterSlot.week == league.current_week,
                 RosterSlot.platform_player_id == roster_fields["platform_player_id"],
             )
+            .order_by(RosterSlot.id)
         )
-        slot = result.scalar_one_or_none()
+        slot = result.scalars().first()
         if slot is None:
             session.add(
                 RosterSlot(
@@ -166,13 +176,15 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             if platform_player_id != roster_fields["platform_player_id"] or week == league.current_week:
                 continue
             result = await session.execute(
-                select(RosterSlot).where(
+                select(RosterSlot)
+                .where(
                     RosterSlot.team_id == team.id,
                     RosterSlot.week == week,
                     RosterSlot.platform_player_id == platform_player_id,
                 )
+                .order_by(RosterSlot.id)
             )
-            historical_slot = result.scalar_one_or_none()
+            historical_slot = result.scalars().first()
             if historical_slot is None:
                 session.add(
                     RosterSlot(
@@ -188,14 +200,16 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
 
     for projection_fields in parse_projections(raw):
         result = await session.execute(
-            select(ProjectionRecord).where(
+            select(ProjectionRecord)
+            .where(
                 ProjectionRecord.league_id == league.id,
                 ProjectionRecord.platform_player_id == projection_fields["platform_player_id"],
                 ProjectionRecord.week == league.current_week,
                 ProjectionRecord.source == "espn",
             )
+            .order_by(ProjectionRecord.id)
         )
-        record = result.scalar_one_or_none()
+        record = result.scalars().first()
         if record is None:
             session.add(
                 ProjectionRecord(

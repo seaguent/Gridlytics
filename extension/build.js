@@ -13,7 +13,7 @@ manifest.host_permissions = isDev ? [`${DEV_API_URL}/*`, ...prodHostPermissions]
 writeFileSync("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
 
 await esbuild.build({
-  entryPoints: ["src/content.tsx", "src/background.ts", "src/popup.tsx"],
+  entryPoints: ["src/content.tsx", "src/background.ts"],
   bundle: true,
   outdir: ".",
   format: "iife",
@@ -23,4 +23,4 @@ await esbuild.build({
   define: { __API_BASE_URL__: JSON.stringify(apiBaseUrl) },
 });
 
-console.log(`Built content.js, background.js, and popup.js (API: ${apiBaseUrl})`);
+console.log(`Built content.js and background.js (API: ${apiBaseUrl})`);
