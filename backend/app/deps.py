@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, UTC
 
@@ -12,6 +13,16 @@ from app.sleeper.sync import refresh_league
 from app.tokens import hash_token
 
 REFRESH_TTL = timedelta(minutes=30)
+
+_league_refresh_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_league_refresh_lock(league_id: int) -> asyncio.Lock:
+    lock = _league_refresh_locks.get(league_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _league_refresh_locks[league_id] = lock
+    return lock
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -66,11 +77,17 @@ async def get_fresh_league(
         # Non-Sleeper platforms only update via an authenticated client POST, not a server-side refresh.
         return league
 
-    now = datetime.now(UTC).replace(tzinfo=None)
-    if league.last_synced_at is None or now - league.last_synced_at > REFRESH_TTL:
-        client = SleeperClient()
-        try:
-            league = await refresh_league(session, client, league.platform_league_id)
-        finally:
-            await client.aclose()
+    async with _get_league_refresh_lock(league.id):
+        # Re-check last_synced_at inside the lock -- another concurrent request may have
+        # already refreshed this league while we were waiting, in which case skip the redundant work.
+        result = await session.execute(select(League).where(League.id == league.id))
+        league = result.scalar_one()
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        if league.last_synced_at is None or now - league.last_synced_at > REFRESH_TTL:
+            client = SleeperClient()
+            try:
+                league = await refresh_league(session, client, league.platform_league_id)
+            finally:
+                await client.aclose()
     return league

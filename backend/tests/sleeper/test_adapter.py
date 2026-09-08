@@ -129,6 +129,36 @@ async def test_sync_week_creates_matchups_and_weekly_scores(db_session):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_sync_week_tolerates_a_preexisting_duplicate_matchup_row(db_session):
+    _mock_sleeper_league("123")
+    _mock_sleeper_week1_matchups("123")
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, "123")
+
+    db_session.add(Matchup(league_id=league.id, week=1, platform_matchup_id=10))
+    db_session.add(Matchup(league_id=league.id, week=1, platform_matchup_id=10))
+    await db_session.commit()
+
+    await sync_week(db_session, client, league, week=1)
+    await client.aclose()
+
+    result = await db_session.execute(
+        select(Matchup).where(Matchup.league_id == league.id).order_by(Matchup.id)
+    )
+    matchups = result.scalars().all()
+    assert len(matchups) == 2
+
+    result = await db_session.execute(
+        select(WeeklyScore).where(WeeklyScore.matchup_id == matchups[0].id)
+    )
+    scores = result.scalars().all()
+    assert len(scores) == 2
+    assert {score.points for score in scores} == {105.5, 98.2}
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_sync_week_is_idempotent(db_session):
     _mock_sleeper_league("123")
     _mock_sleeper_week1_matchups("123")

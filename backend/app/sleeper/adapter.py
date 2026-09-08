@@ -22,7 +22,7 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
             League.season == raw_league.season,
         )
     )
-    league = result.scalar_one_or_none()
+    league = result.scalars().first()
     if league is None:
         league = League(
             platform="sleeper",
@@ -52,12 +52,14 @@ async def sync_league(session: AsyncSession, client: SleeperClient, league_id: s
 
     for raw_roster in raw_rosters:
         result = await session.execute(
-            select(Team).where(
+            select(Team)
+            .where(
                 Team.league_id == league.id,
                 Team.platform_roster_id == str(raw_roster.roster_id),
             )
+            .order_by(Team.id)
         )
-        team = result.scalar_one_or_none()
+        team = result.scalars().first()
         display_name = display_names.get(raw_roster.owner_id, f"Roster {raw_roster.roster_id}")
 
         if team is None:
@@ -101,13 +103,15 @@ async def sync_week(
 
         if matchup is None:
             result = await session.execute(
-                select(Matchup).where(
+                select(Matchup)
+                .where(
                     Matchup.league_id == league.id,
                     Matchup.week == week,
                     Matchup.platform_matchup_id == platform_matchup_id,
                 )
+                .order_by(Matchup.id)
             )
-            matchup = result.scalar_one_or_none()
+            matchup = result.scalars().first()
             if matchup is None:
                 matchup = Matchup(
                     league_id=league.id, week=week, platform_matchup_id=platform_matchup_id
@@ -121,12 +125,14 @@ async def sync_week(
             continue
 
         result = await session.execute(
-            select(WeeklyScore).where(
+            select(WeeklyScore)
+            .where(
                 WeeklyScore.team_id == team.id,
                 WeeklyScore.matchup_id == matchup.id,
             )
+            .order_by(WeeklyScore.id)
         )
-        weekly_score = result.scalar_one_or_none()
+        weekly_score = result.scalars().first()
         if weekly_score is None:
             session.add(
                 WeeklyScore(team_id=team.id, matchup_id=matchup.id, week=week, points=raw.points)
@@ -139,13 +145,15 @@ async def sync_week(
             is_starter = platform_player_id in starters
 
             result = await session.execute(
-                select(RosterSlot).where(
+                select(RosterSlot)
+                .where(
                     RosterSlot.team_id == team.id,
                     RosterSlot.week == week,
                     RosterSlot.platform_player_id == platform_player_id,
                 )
+                .order_by(RosterSlot.id)
             )
-            slot = result.scalar_one_or_none()
+            slot = result.scalars().first()
             if slot is None:
                 session.add(
                     RosterSlot(
@@ -196,14 +204,16 @@ async def sync_projections(session: AsyncSession, client: SleeperClient, league:
         name = f"{raw.player.first_name or ''} {raw.player.last_name or ''}".strip() or raw.player_id
 
         result = await session.execute(
-            select(ProjectionRecord).where(
+            select(ProjectionRecord)
+            .where(
                 ProjectionRecord.league_id == league.id,
                 ProjectionRecord.platform_player_id == raw.player_id,
                 ProjectionRecord.week == league.current_week,
                 ProjectionRecord.source == "sleeper",
             )
+            .order_by(ProjectionRecord.id)
         )
-        record = result.scalar_one_or_none()
+        record = result.scalars().first()
         if record is None:
             session.add(
                 ProjectionRecord(
