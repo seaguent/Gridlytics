@@ -76,10 +76,7 @@ async def _load_roster_players(
         player = players_by_id.get(pid)
         if player is None:
             continue
-        # POSITION_CATEGORIES (QB/RB/WR/TE) governs whether a context-aware gridlytics_base gets
-        # attempted below -- K/DEF have no rate model and simply never get one, same as everyone
-        # else falls back to platform-only when gridlytics_base is missing. It must never gate
-        # whether a player counts toward the roster at all, or K/DEF slots go silently unfilled.
+        # POSITION_CATEGORIES governs the context-aware model attempt only -- never gates roster membership itself.
         players.append({
             "player_id": pid,
             "position": player.position,
@@ -191,9 +188,7 @@ async def compute_trade_analysis(
     receive_current = [other_current_by_id[pid] for pid in receive_player_ids if pid in other_current_by_id]
     give_current = [my_current_by_id[pid] for pid in give_player_ids if pid in my_current_by_id]
 
-    # Both before and after use the OPTIMAL lineup -- an existing lineup-setting mistake (the
-    # manager benching their best player) is a real, separate problem Start/Sit already surfaces,
-    # but it must never leak into the trade delta, which has to isolate the trade's own value.
+    # Both before and after use the optimal lineup -- an existing lineup mistake must never leak into the trade delta.
     your_actual_current_starters_points = sum(
         c["points"] for c in my_current if c["player_id"] in my_starting_ids
     )
@@ -246,8 +241,7 @@ async def compute_trade_analysis(
             "current_week_delta": your_current_week_after - your_current_week_before,
             "rest_of_season_before": your_ros_before, "rest_of_season_after": your_ros_after,
             "rest_of_season_delta": your_ros_after - your_ros_before,
-            # Context only -- what the manager actually has started this week, never used in the
-            # delta above. Can differ from current_week_before when the real lineup isn't optimal.
+            # Context only, never used in the delta above -- can differ from current_week_before when the lineup isn't optimal.
             "actual_current_starters_points": your_actual_current_starters_points,
             "reasons": _reasons_for(receive_player_ids, other_current_by_id, other_names),
         },

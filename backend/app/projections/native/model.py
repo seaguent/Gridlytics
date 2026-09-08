@@ -55,8 +55,7 @@ def _blended_rate(
     if not prior_season_games:
         return current_shrunk
 
-    # Team change discounts (doesn't erase) how much we trust the PRIOR team's rate -- softer
-    # than volume's hard zero-out, per the spec's explicit distinction between the two.
+    # Team change discounts (doesn't erase) trust in the prior team's rate -- softer than volume's hard zero-out.
     prior_rates = extract_player_rate_series(prior_season_games, category, rate_name)
     prior_opportunities = sum(g.get(category.opportunity_column) or 0 for g in prior_season_games)
     prior_shrunk = estimate_player_efficiency(
@@ -96,8 +95,7 @@ def project_player_points_detailed(
     if not categories:
         return None
 
-    # Local name deliberately NOT `prior_season_weight` -- that would shadow the imported
-    # function of the same name from app.projections.blending.
+    # Local name deliberately not `prior_season_weight` -- would shadow the imported function of the same name.
     prior_weight = prior_season_weight(len(current_season_games))
 
     total_points = 0.0
@@ -121,13 +119,10 @@ def project_player_points_detailed(
                 if position_rate_avg is None:
                     continue  # Can't shrink without a position average -- skip this rate component.
 
-                # Real per-league scoring value, not the hardcoded standard-PPR default baked
-                # into rate_specs -- that default is still what STANDARD_PPR itself resolves to.
+                # Real per-league scoring value, not the hardcoded standard-PPR default baked into rate_specs.
                 points_per_unit = getattr(scoring_rules, SCORING_FIELD_BY_CATEGORY_RATE[(category.name, rate_name)])
 
-                # Opt-in only: td_shrinkage_opportunities is None by default, so every existing
-                # caller (production sync, prior backtests) keeps the games-based shrinkage curve
-                # for every rate, td_rate included -- untouched by this experiment unless supplied.
+                # Opt-in only: td_shrinkage_opportunities is None by default, keeping the games-based curve untouched.
                 full_confidence_opportunities = (
                     td_shrinkage_opportunities.get(category.name)
                     if td_shrinkage_opportunities is not None and rate_name == "td_rate"

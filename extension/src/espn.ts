@@ -3,8 +3,7 @@ export interface EspnLeagueInfo {
   season: string;
 }
 
-// The NFL season is named for the year it starts (a season starting Sept 2026 runs into early
-// 2027). Treat August onward as the new season having started; before that, it's still last year's.
+// The NFL season is named for the year it starts -- treat August onward as the new season having started.
 function currentNflSeason(): string {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -28,8 +27,7 @@ export function extractEspnLeagueInfo(url: string): EspnLeagueInfo | null {
     return null;
   }
 
-  // ESPN's own site doesn't always include seasonId in the URL (e.g. some "My Team" links) --
-  // fall back to the current NFL season instead of failing to detect the page at all.
+  // ESPN's own site doesn't always include seasonId -- fall back instead of failing to detect the page.
   const season = parsed.searchParams.get("seasonId") ?? currentNflSeason();
 
   return { leagueId, season };

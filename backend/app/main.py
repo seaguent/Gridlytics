@@ -446,9 +446,7 @@ async def get_rankings(
     native_by_player = {r.platform_player_id: r for r in result.scalars()}
     platform_projection_by_player = await fetch_platform_only_projections(session, league)
 
-    # The final blended Gridlytics projection (context-aware base x platform, per
-    # compute_final_projection's zero-handling rules) is what drives ranking/VOR going forward
-    # -- not the raw multi-source ensemble average, and not the unblended Gridlytics base alone.
+    # The final blended projection (not the raw ensemble or the unblended base) drives ranking/VOR.
     final_projections = [
         replace(
             p,
@@ -483,8 +481,7 @@ async def get_rankings(
                 "platform_player_id": p.platform_player_id,
                 "name": p.name,
                 "position": p.position,
-                # The primary "X proj" field is the untouched ESPN/Sleeper platform number --
-                # NEVER the blend. Gridlytics' own (blended) opinion is a separate field below.
+                # The primary "X proj" field is the untouched platform number, never the blend.
                 "projected_points": platform_projection_by_player.get(p.platform_player_id),
                 "sources": p.sources,
                 "value_over_replacement": player_vor,
@@ -497,9 +494,7 @@ async def get_rankings(
                 "gridlytics_base_projection": native.projected_points if native else None,
                 "platform_projection": platform_projection_by_player.get(p.platform_player_id),
                 "final_gridlytics_projection": final_by_player.get(p.platform_player_id),
-                # "Gridlytics" in the UI is the blended final number, not the raw base --
-                # comparing this against "projected_points" (pure platform) is the real,
-                # user-facing ESPN-vs-Gridlytics comparison.
+                # "Gridlytics" in the UI is the blended final number, not the raw base.
                 "gridlytics_projected_points": final_by_player.get(p.platform_player_id),
                 "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
                 "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
@@ -556,8 +551,7 @@ async def get_waivers(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     if league.platform == "espn":
-        # ESPN has no server-side auth -- free-agent data can only arrive via POST with a
-        # browser-fetched payload (see post_waivers below), never through a bare GET.
+        # ESPN has no server-side auth -- free-agent data only arrives via POST (see post_waivers).
         return {"mode": "unsupported_platform", "recommendations": []}
     return await compute_waiver_recommendations(session, league, connection)
 

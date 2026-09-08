@@ -280,13 +280,10 @@ async def sync_position_volatility_priors(session: AsyncSession, season: str, we
 
 
 def _dominant_category(breakdown: NativeProjectionBreakdown | CareerAwareBreakdown):
-    # Works unchanged for either breakdown type -- both list a `.categories` sequence whose
-    # entries carry `.name`/`.expected_opportunities` (CategoryBreakdown and CategoryShareBreakdown
-    # respectively), the only two fields this needs.
+    # Works unchanged for either breakdown type -- both list a `.categories` sequence with `.name`/`.expected_opportunities`.
     if not breakdown.categories:
         return None
-    # Ties prefer the first-listed category for that position -- breakdown.categories already
-    # preserves POSITION_CATEGORIES' order since it's built in that same loop order.
+    # Ties prefer the first-listed category -- breakdown.categories already preserves POSITION_CATEGORIES' order.
     best = breakdown.categories[0]
     for category in breakdown.categories[1:]:
         if (category.expected_opportunities or 0) > (best.expected_opportunities or 0):
@@ -322,11 +319,7 @@ async def sync_context_aware_projections(
         select(Player).where(Player.platform == league.platform, Player.platform_player_id.in_(rostered_player_ids))
     )
     players_by_id = {p.platform_player_id: p for p in result.scalars()}
-    # Injury/availability for same-position teammates, scoped to this league's already-rostered
-    # players (player_to_gsis and players_by_id are already loaded for exactly that set -- no
-    # new query, no new ingestion). A teammate outside that set (e.g. a true free-agent starter
-    # on ESPN) simply won't appear here; compute_effective_pos_rank treats an unresolved
-    # teammate as available, so it's a silent no-promotion, not a wrong one.
+    # Injury/availability for same-position teammates, scoped to this league's already-rostered players -- a teammate outside that set is treated as available (silent no-promotion, not a wrong one).
     availability_by_gsis: dict[str, str] = {
         gsis_id: classify_availability(players_by_id[pid].injury_status, is_bye=False)
         for pid, gsis_id in player_to_gsis.items()
@@ -341,8 +334,7 @@ async def sync_context_aware_projections(
     )
     baseline_by_player = {row.platform_player_id: row for row in result.scalars()}
 
-    # Multi-year team prior replaces the brittle single-season carry-forward for every
-    # context-aware category.
+    # Multi-year team prior replaces the brittle single-season carry-forward for every context-aware category.
     multi_year_team_prior_by_team = compute_team_prior_by_team(
         team_weekly_by_year, target_season=season, lookback=LOOKBACK_SEASONS, decay=RECENCY_DECAY,
     )
@@ -374,9 +366,7 @@ async def sync_context_aware_projections(
 
     for platform_player_id in rostered_player_ids:
         player = players_by_id.get(platform_player_id)
-        # Position must come from the app's own already-synced Player.position, not from
-        # nflverse rows -- a true zero-history rookie has no nflverse rows at all, and must
-        # still get a position-prior-based projection, not be silently skipped.
+        # Position comes from the app's own Player.position -- a zero-history rookie has no nflverse rows at all.
         if player is None or player.position not in POSITION_CATEGORIES:
             continue
 
@@ -412,8 +402,7 @@ async def sync_context_aware_projections(
                 fallback_confidence = "low" if roles_batch else "unknown"
                 role = RoleInfo(pos_rank=None, role_confidence=fallback_confidence, role_changed_recently=False)
 
-            # role.pos_rank stays the untouched, real nflverse depth-chart rank -- projection_role
-            # is a separate, additively-derived value, never a mutation of role/roles_batch.
+            # role.pos_rank stays untouched -- projection_role is a separate, additively-derived value.
             projection_role = role
             room = teammate_groups.get((current_team, player.position), [])
             if room:
@@ -436,9 +425,7 @@ async def sync_context_aware_projections(
 
             qb_context = qb_context_by_team.get(current_team)
             if qb_context is not None:
-                # No QB-change workload discount -- a directional test found no consistent effect
-                # on team pass volume. qb_changed stays purely informational, surfaced via the
-                # breakdown/qb_context.
+                # No QB-change workload discount -- a directional test found no consistent effect on team pass volume.
                 career_prior = compute_career_prior(
                     career_seasons, team_changed=team_changed, role_changed_recently=role.role_changed_recently,
                 )
@@ -454,17 +441,13 @@ async def sync_context_aware_projections(
             projected_points = breakdown_new.total_points
             dominant = _dominant_category(breakdown_new)
         elif native_breakdown is not None:
-            # The context-aware model genuinely had nothing to say (e.g. unknown depth-chart rank
-            # with zero career and zero current-season evidence) -- fall back to native's own
-            # position-average-based projection rather than silently skipping a rostered player.
+            # The context-aware model had nothing to say -- fall back to native rather than silently skipping.
             projected_points = native_breakdown.total_points
             dominant = _dominant_category(native_breakdown)
         else:
             continue
 
-        # Same games-played-based blend weight either model actually used internally (current-
-        # season stats progressively outweigh prior-season/career priors as real games accumulate)
-        # -- real, computed here, not a fabricated per-category value.
+        # Same games-played-based blend weight either model used internally -- real, not a fabricated value.
         prior_weight = prior_season_weight(len(current_games))
         expected_opportunities = dominant.expected_opportunities if dominant else None
         dominant_category = dominant.name if dominant else None

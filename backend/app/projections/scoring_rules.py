@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 
-# Real, community-verified ESPN fantasy statId -> stat name mapping (cwendt94/espn-api project,
-# a widely-used open-source ESPN fantasy API wrapper). Not yet confirmed against a live raw ESPN
-# response from this app's own auth -- this sandbox has no ESPN browser session to verify against.
+# Real, community-verified ESPN fantasy statId -> stat name mapping (cwendt94/espn-api project).
 ESPN_STAT_ID_TO_FIELD = {
     3: "pass_yard_points",
     4: "pass_td_points",
@@ -52,8 +50,7 @@ def scoring_rules_from_espn(scoring_settings: dict) -> ScoringRules:
             continue
         overrides[field] = item["points"]
 
-    # Never silently claim league-specific accuracy for a field we couldn't parse -- fields not
-    # present in overrides fall back explicitly to STANDARD_PPR's own value, field by field.
+    # Never silently claim league-specific accuracy for a field we couldn't parse -- falls back to STANDARD_PPR.
     return ScoringRules(
         pass_yard_points=overrides.get("pass_yard_points", STANDARD_PPR.pass_yard_points),
         pass_td_points=overrides.get("pass_td_points", STANDARD_PPR.pass_td_points),

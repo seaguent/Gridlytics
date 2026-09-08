@@ -35,16 +35,14 @@ def estimate_player_efficiency(
     if player_rate is None:
         return position_average
 
-    # Opt-in only: omitting full_confidence_opportunities reproduces the games-based path
-    # exactly, so every existing caller (production sync included) is untouched by this branch.
+    # Opt-in only: omitting full_confidence_opportunities reproduces the games-based path exactly.
     if full_confidence_opportunities is not None:
         weight = _opportunity_shrinkage_weight(observed_opportunities or 0.0, full_confidence_opportunities)
     else:
         weight = _shrinkage_weight(len(per_game_rates))
 
     if team_changed:
-        # Softer than the volume-side team-change handling -- a team change discounts how much
-        # we trust a player's own rate, but doesn't erase their real skill signal outright.
+        # Softer than the volume-side team-change handling -- discounts trust, doesn't erase the skill signal.
         weight *= TEAM_CHANGE_DISCOUNT
 
     return weight * player_rate + (1 - weight) * position_average

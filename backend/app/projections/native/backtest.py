@@ -13,10 +13,7 @@ def _index_games_by_player_season(df: pd.DataFrame) -> dict[tuple, list[dict]]:
     """Pure performance change: materializes each (player_id, season) game list once instead of re-filtering per lookup."""
     regular_season = df[df["season_type"] == "REG"].sort_values("week")
     grouped: dict[tuple, list[dict]] = {}
-    # One large to_dict("records") call, then group in plain Python -- pandas' to_dict("records")
-    # has enough fixed per-call overhead that calling it once per (player, season) group (thousands
-    # of small calls) is slower in aggregate than one call over the whole frame. Global sort by
-    # week above means each player's appended list ends up week-ascending without a per-group sort.
+    # One large to_dict("records") call is faster in aggregate than thousands of small per-group calls.
     for row in regular_season.to_dict("records"):
         grouped.setdefault((row["player_id"], row["season"]), []).append(row)
     return grouped

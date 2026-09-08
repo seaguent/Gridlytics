@@ -43,9 +43,7 @@ def run_comparative_backtest(
             compute_share_priors_by_rank(weekly_with_shares, depth_charts, season=season, before_week=week, as_of_date=as_of_date)
             if as_of_date is not None else {}
         )
-        # Computed once per week (as_of_date is the same for every player that week), not once
-        # per player -- re-filtering the full multi-season depth_charts DataFrame per player is
-        # the real bottleneck a real backtest run exposed (~60s/week vs. ~2s/week batched).
+        # Computed once per week, not once per player -- per-player re-filtering was the real bottleneck (~60s/week vs. ~2s/week).
         roles_batch = load_current_roles_batch(depth_charts, as_of_date) if as_of_date is not None else {}
 
         actual_rows = regular_season[(regular_season["season"] == season) & (regular_season["week"] == week)]
@@ -82,9 +80,7 @@ def run_comparative_backtest(
             if as_of_date is not None:
                 role = roles_batch.get((player_id, position))
                 if role is None:
-                    # Distinguish "no snapshot existed at all before this cutoff" (unknown,
-                    # matches load_current_role's empty-snapshot case) from "a snapshot existed
-                    # but this specific player wasn't in it" (low, matches its not-found case).
+                    # Distinguish "no snapshot existed" (unknown) from "a snapshot existed but this player wasn't in it" (low).
                     fallback_confidence = "low" if roles_batch else "unknown"
                     role = RoleInfo(pos_rank=None, role_confidence=fallback_confidence, role_changed_recently=False)
                 role_confidence = role.role_confidence

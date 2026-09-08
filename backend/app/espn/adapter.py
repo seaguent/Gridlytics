@@ -169,9 +169,7 @@ async def sync_league(session: AsyncSession, raw: EspnLeagueResponse) -> League:
             slot.is_starter = roster_fields["is_starter"]
             slot.points = current_week_points
 
-        # A player's actual score history isn't week-scoped to "currently on this roster" the way
-        # membership is -- backfill every other real week we have data for under their current team,
-        # since this app doesn't track historical roster composition separately.
+        # Backfill every other real week under their current team -- roster history isn't tracked separately.
         for (platform_player_id, week), points in actual_points_by_player_week.items():
             if platform_player_id != roster_fields["platform_player_id"] or week == league.current_week:
                 continue

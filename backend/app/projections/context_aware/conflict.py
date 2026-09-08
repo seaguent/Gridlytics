@@ -1,9 +1,6 @@
 NEAR_ZERO_THRESHOLD = 1.0
 
-# Heuristic default, not backtest-calibrated. Fraction: platform and context-aware projections
-# disagree when the smaller is less than this fraction of the larger (e.g. 0.4 means "less than
-# 40% of the other side"). This is diagnostic-only (never enters context_aware_points math), so
-# miscalibration only affects how often the conflict flag fires, not projection accuracy.
+# Heuristic default, not backtest-calibrated -- diagnostic-only, never enters context_aware_points math.
 DISAGREEMENT_RATIO_THRESHOLD = 0.4
 
 

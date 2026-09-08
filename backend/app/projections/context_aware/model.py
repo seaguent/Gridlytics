@@ -17,8 +17,7 @@ from app.projections.native.categories import (
 from app.projections.native.efficiency import estimate_player_efficiency
 from app.projections.scoring_rules import STANDARD_PPR, ScoringRules
 
-# Which raw stat column each derived share (beyond "receiving", which reuses target_share
-# directly) is a fraction of the team's per-game total for.
+# Which raw stat column each derived share (beyond "receiving") is a fraction of the team's per-game total for.
 SHARE_VOLUME_COLUMN = {"rushing": "carries", "passing": "attempts"}
 
 
@@ -49,10 +48,7 @@ def add_share_columns(weekly_stats: pd.DataFrame) -> pd.DataFrame:
     result = weekly_stats.copy()
     result["receiving_share"] = result["target_share"]
     for category_name, volume_col in SHARE_VOLUME_COLUMN.items():
-        # season must be part of the grouping identity, not just (team, week) -- a multi-season
-        # frame (every caller passes one, since prior-season history has to be present) would
-        # otherwise sum a team's "week 3" total across every season present, silently corrupting
-        # every player's share.
+        # season must be part of the grouping identity -- otherwise a multi-season frame sums "week 3" across every season.
         team_totals = result.groupby(["team", "season", "week"])[volume_col].transform("sum")
         result[f"{category_name}_share"] = result[volume_col] / team_totals.replace(0, pd.NA)
     return result
@@ -131,10 +127,7 @@ def project_context_aware_points_detailed(
             else team_tendencies.rush_attempts_per_game
         )
 
-        # Uniform across all three categories: current_season_games/prior_season_games are
-        # expected to already carry a f"{category.name}_share" key on every game dict, added by
-        # add_share_columns() on the full multi-player DataFrame BEFORE per-player slicing (a
-        # single player's own row can't derive their team-share on its own).
+        # Every game dict is expected to already carry a f"{category.name}_share" key, added by add_share_columns().
         share_key = f"{category.name}_share"
         current_shares = [g[share_key] for g in current_season_games if g.get(share_key) is not None]
         prior_shares = (
@@ -161,8 +154,7 @@ def project_context_aware_points_detailed(
                 if position_rate_avg is None:
                     continue
 
-                # Real per-league scoring value, not the hardcoded standard-PPR default baked
-                # into rate_specs -- that default is still what STANDARD_PPR itself resolves to.
+                # Real per-league scoring value, not the hardcoded standard-PPR default baked into rate_specs.
                 points_per_unit = getattr(scoring_rules, SCORING_FIELD_BY_CATEGORY_RATE[(category.name, rate_name)])
 
                 player_rates = extract_player_rate_series(current_season_games, category, rate_name)
@@ -180,9 +172,7 @@ def project_context_aware_points_detailed(
             )
         )
 
-    # If NOT ONE category resolved any real expected_opportunities, there is genuinely nothing to
-    # project from -- report this as an abstention (None), never a fabricated 0.0 that would be
-    # indistinguishable from a real projected zero downstream (e.g. in the backtest's scoring).
+    # If no category resolved real expected_opportunities, abstain (None) rather than a fabricated 0.0.
     any_category_resolved = any(c.expected_opportunities is not None for c in category_breakdowns)
     final_points = total_points if any_category_resolved else None
 
@@ -204,10 +194,7 @@ def project_context_aware_points_detailed(
     )
 
 
-# ============================================================================
-# Career-prior-aware model: adds multi-year player/team/QB context on top of the
-# position-share model above.
-# ============================================================================
+# Career-prior-aware model: adds multi-year player/team/QB context on top of the position-share model above.
 
 
 @dataclass
@@ -260,17 +247,13 @@ CAREER_TALENT_KEY_BY_CATEGORY_RATE: dict[tuple[str, str], str | None] = {
 CATEGORY_TO_WORKLOAD_STAT: dict[str, str | None] = {
     "receiving": "target_share",
     "rushing": "carry_share",
-    # A starting QB's "share" of team pass attempts isn't a career-workload concept the way
-    # WR/RB share is -- QB identity/role is handled entirely by qb_context.py instead.
+    # A starting QB's "share" isn't a career-workload concept -- QB role is handled by qb_context.py instead.
     "passing": None,
 }
 
 CATEGORY_TO_OPPORTUNITY_COLUMN = {"receiving": "targets", "rushing": "carries", "passing": "attempts"}
 
-# qb_changed intentionally never discounts workload confidence here: a backtest found no
-# consistent directional effect of a QB change on team pass volume. It stays purely
-# informational, surfaced via QBContext/CareerAwareBreakdown.qb_context for explainability and
-# conflict detection only.
+# qb_changed never discounts workload confidence -- a backtest found no consistent directional effect on team pass volume.
 
 
 @dataclass
@@ -291,10 +274,7 @@ class CareerAwareBreakdown:
     team_offense: TeamTendencies
 
 
-# Empirically chosen via backtest grid search. Talent has a real interior optimum (both smaller
-# and larger values perform worse). Workload is kept at a low, near-unconditional-trust value
-# (1, not 0) so a player with zero real career opportunities still falls back to the role-rank
-# prior instead of dividing by zero.
+# Empirically chosen via backtest grid search. Workload kept at 1 (not 0) so zero career opportunities falls back cleanly.
 TALENT_FULL_CONFIDENCE_OPPORTUNITIES: dict[str, float | None] = {
     "receiving": 250, "rushing": 250, "passing": 750,
 }
@@ -326,9 +306,7 @@ def project_context_aware_points_detailed_v2(
     if availability_status == "unavailable":
         return None
 
-    # The structural fix for the stale-team bug class: team_changed can ONLY ever be derived
-    # from these two explicitly-typed, explicitly-sourced parameters. No other value (a game
-    # dict's own team field, a cached historical value) can influence it.
+    # team_changed can only ever be derived from these two explicit parameters -- never a cached or game-dict value.
     team_changed = bool(current_team and prior_season_team and current_team != prior_season_team)
 
     rank_priors = share_priors_by_rank.get(position, {}).get(role.pos_rank or -1, {})

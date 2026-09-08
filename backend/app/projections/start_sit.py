@@ -242,18 +242,13 @@ async def compute_start_sit(
 
         native = native_by_id.get(platform_player_id)
         platform_projection = platform_projection_by_id.get(platform_player_id)
-        # Gridlytics' own decision number: context-aware base blended with the platform's own
-        # projection, per compute_final_projection's zero-handling rules. Drives the optimizer
-        # and sort order -- the row's "projected_points" display field stays the untouched
-        # platform number instead (set below).
+        # Drives the optimizer and sort order -- "projected_points" display field stays the untouched platform number.
         final_projection = compute_final_projection(
             gridlytics_base=native.projected_points if native else None,
             platform_projection=platform_projection,
             availability_status=metrics.availability if metrics else None,
         )
-        # Explanation text narrates Gridlytics' own reasoning, so it uses Gridlytics' number
-        # (the blend), not the platform's. Floor/ceiling stay from the original multi-source
-        # ensemble range, unchanged.
+        # Explanation text narrates using the blended number, not the platform's -- floor/ceiling stay from the ensemble range.
         explanation_projection = replace(projection, projected_points=final_projection) if projection else None
         blended_projections_by_id[platform_player_id] = explanation_projection
 
@@ -262,8 +257,7 @@ async def compute_start_sit(
             "name": name,
             "position": position,
             "currently_starting": roster.get(platform_player_id, False),
-            # The primary "X proj" field is the untouched ESPN/Sleeper platform number -- NEVER
-            # the blend. Gridlytics' own (blended) opinion is a separate field below.
+            # The primary "X proj" field is the untouched platform number, never the blend.
             "projected_points": platform_projection,
             "sources": projection.sources if projection else [],
             "floor": projection.floor if projection else None,
@@ -274,9 +268,7 @@ async def compute_start_sit(
             "gridlytics_base_projection": native.projected_points if native else None,
             "platform_projection": platform_projection,
             "final_gridlytics_projection": final_projection,
-            # "Gridlytics" in the UI is the blended final number, not the raw base --
-            # comparing this against "projected_points" (pure platform) is the real,
-            # user-facing ESPN-vs-Gridlytics comparison.
+            # "Gridlytics" in the UI is the blended final number, not the raw base.
             "gridlytics_projected_points": final_projection,
             "gridlytics_expected_opportunities": native.expected_opportunities if native else None,
             "gridlytics_prior_season_weight": native.prior_season_weight if native else None,
@@ -320,8 +312,7 @@ async def compute_start_sit(
             row["comparison"] = None
             bench.append(row)
 
-    # Pair each newly-recommended starter with the real starter they're bumping (same slot-eligible
-    # position), so the UI can present it as one "start X over Y" decision instead of two loose cards.
+    # Pair each newly-recommended starter with the real starter they're bumping, for one "start X over Y" card.
     unpaired_swap_outs = [row for row in bench if row["action"] == "swap_out"]
     for starter_row in starters:
         if starter_row["action"] != "swap_in":
@@ -336,8 +327,7 @@ async def compute_start_sit(
         starter_row["swap_out_player_id"] = partner_id
         starter_row["swap_out_name"] = partner["name"]
         if blended_projections_by_id.get(partner_id) is not None:
-            # Same blended number the optimizer used to make this swap decision, so the
-            # head-to-head "+Z pts" gap matches the reasoning behind the recommendation.
+            # Same blended number the optimizer used, so the head-to-head "+Z pts" gap matches the reasoning.
             starter_row["comparison"] = compare_players(
                 blended_projections_by_id[starter_id],
                 metrics_by_id.get(starter_id),
@@ -345,8 +335,7 @@ async def compute_start_sit(
                 metrics_by_id.get(partner_id),
             )
 
-    # Sort and lineup-points math stay on Gridlytics' own (blended) decision number, matching
-    # what the optimizer itself maximized -- not the pure platform display field.
+    # Sort and lineup-points math stay on the blended decision number the optimizer maximized, not the display field.
     starters.sort(key=lambda r: (r["final_gridlytics_projection"] or 0), reverse=True)
     bench.sort(key=lambda r: (r["final_gridlytics_projection"] or 0), reverse=True)
 

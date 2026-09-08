@@ -78,8 +78,7 @@ async def get_fresh_league(
         return league
 
     async with _get_league_refresh_lock(league.id):
-        # Re-check last_synced_at inside the lock -- another concurrent request may have
-        # already refreshed this league while we were waiting, in which case skip the redundant work.
+        # Re-check inside the lock -- another request may have already refreshed while we waited.
         result = await session.execute(select(League).where(League.id == league.id))
         league = result.scalar_one()
 

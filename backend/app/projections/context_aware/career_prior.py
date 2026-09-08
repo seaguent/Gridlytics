@@ -34,8 +34,7 @@ class CareerSeason:
     catch_rate: float | None
     receiving_td_rate: float | None
     rushing_td_rate: float | None
-    # Trailing field with a default so every existing positional/keyword CareerSeason(...)
-    # call site (tests, scripts) built before this extension keeps working unchanged.
+    # Trailing field with a default so every existing CareerSeason(...) call site keeps working unchanged.
     passing_interceptions: int | None = None
 
     @property
@@ -77,9 +76,7 @@ class CareerSeason:
 
 FULL_CONFIDENCE_SEASON_GAMES = 8  # a season below this many real games contributes proportionally less
 
-# Chosen via walk-forward grid search over lookback/decay candidates (see
-# scripts/run_career_prior_validation.py) -- a 3-season lookback with this decay beat both a
-# single-season baseline and slower-decaying alternatives on held-out MAE.
+# Chosen via walk-forward grid search (scripts/run_career_prior_validation.py) -- beat single-season baseline on held-out MAE.
 RECENCY_DECAY = 0.40
 
 
@@ -151,8 +148,7 @@ def compute_career_prior(
     talent = _average_talent(seasons)
 
     if team_changed:
-        # Hard zero, mirrors volume.py's existing team-change handling -- a workload built on a
-        # different team's offense doesn't transfer. Talent is untouched (see above).
+        # Hard zero, mirrors volume.py -- a workload built on a different team's offense doesn't transfer.
         workload = {stat: None for stat in WORKLOAD_STATS}
     else:
         workload = _average_workload(seasons)

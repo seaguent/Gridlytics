@@ -46,10 +46,7 @@ POSITION_CATEGORIES: dict[str, list[RateCategory]] = {
     "TE": [RECEIVING],
 }
 
-# Maps (category_name, rate_name) -> the ScoringRules field that should supply its real
-# points-per-unit value, so a league's actual scoring settings can override the standard-PPR
-# defaults baked into rate_specs above without changing RateCategory's own shape or any of the
-# opportunity/efficiency estimation that consumes it.
+# Maps (category_name, rate_name) -> the ScoringRules field that supplies its real points-per-unit value.
 SCORING_FIELD_BY_CATEGORY_RATE: dict[tuple[str, str], str] = {
     ("passing", "yards_per_attempt"): "pass_yard_points",
     ("passing", "td_rate"): "pass_td_points",

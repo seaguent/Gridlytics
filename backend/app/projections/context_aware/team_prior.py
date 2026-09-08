@@ -6,8 +6,7 @@ TEAM_STATS = ["pass_attempts_per_game", "rush_attempts_per_game"]
 
 FULL_CONFIDENCE_GAMES = 8  # a season below this many real games contributes proportionally less
 
-# Chosen via walk-forward backtest (scripts/run_team_prior_validation.py): a 4-season lookback
-# at this decay beat the single-season baseline on predicting next-season team pass attempts.
+# Chosen via walk-forward backtest (scripts/run_team_prior_validation.py) -- beat single-season baseline.
 RECENCY_DECAY = 0.55
 LOOKBACK_SEASONS = 4
 

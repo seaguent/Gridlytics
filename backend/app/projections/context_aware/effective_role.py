@@ -42,7 +42,5 @@ def compute_effective_pos_rank(
         if teammate.gsis_id == gsis_id:
             return new_rank
 
-    # This player itself is the one who's unavailable -- their own projection is already
-    # hard-gated to zero elsewhere (availability_status == "unavailable" short-circuits
-    # project_context_aware_points_detailed_v2), so the rank returned here is moot either way.
+    # This player is the unavailable one -- their own projection is already hard-gated to zero elsewhere, so this rank is moot.
     return original_pos_rank

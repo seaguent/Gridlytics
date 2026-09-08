@@ -154,12 +154,7 @@ async def compute_waiver_recommendations(
 
     mode = "projection_only" if connection.my_team_id is None else "lineup_comparison"
 
-    # espn_to_gsis (ESPN's own numeric player id -> gsis_id) is loaded exactly once per request,
-    # right here, and reused for two different things below: resolving free-agent candidate
-    # identity (handed to the provider instead of it fetching /players.csv itself) and resolving
-    # rostered ESPN teammates' Player rows for the effective-role availability lookup further
-    # down. Stays None for Sleeper, which doesn't need it -- Sleeper's own gsis_id is already
-    # directly on the Player row.
+    # espn_to_gsis is loaded once and reused for free-agent identity + teammate availability lookups; stays None for Sleeper.
     espn_to_gsis: dict[str, str] | None = None
     if league.platform == "sleeper":
         sleeper_provider = SleeperAvailablePlayerProvider()
@@ -215,14 +210,7 @@ async def compute_waiver_recommendations(
     if not narrowed:
         return {"mode": mode, "recommendations": []}
 
-    # Teammate availability for the effective-role adjustment below, scoped to only the gsis_ids
-    # actually needed (one batched query, not one per candidate). Player.gsis_id is directly
-    # populated for every Sleeper player (the universal sync in app/sleeper/players.py), so
-    # teammates are found by querying that column directly. ESPN Player rows never carry a
-    # gsis_id at all -- teammates are found there via the SAME espn_to_gsis lookup built once
-    # above, reversed (gsis_id -> ESPN's own platform_player_id) to know which Player rows to
-    # query. Either way, a teammate we can't resolve is simply absent from availability_by_gsis;
-    # compute_effective_pos_rank treats that as available (no promotion), never a wrong one.
+    # Teammate availability, scoped to only the needed gsis_ids (one batched query, not one per candidate) -- an unresolved teammate is simply absent, treated as available.
     needed_gsis_ids: set[str] = set()
     for candidate in narrowed:
         if candidate.team:
@@ -285,8 +273,7 @@ async def compute_waiver_recommendations(
             role = roles_by_gsis_position.get((candidate.gsis_id, candidate.position))
             qb_context = qb_context_by_team.get(candidate.team)
             if role is not None and qb_context is not None:
-                # role.pos_rank stays the untouched, real nflverse depth-chart rank -- this is a
-                # separate, additively-derived value, never a mutation of role/roles_by_gsis_position.
+                # role.pos_rank stays untouched -- this is a separate, additively-derived value, never a mutation.
                 projection_role = role
                 room = teammate_groups.get((candidate.team, candidate.position), [])
                 if room:
@@ -392,9 +379,7 @@ async def compute_waiver_recommendations(
         player = roster_players.get(pid)
         if player is None:
             continue
-        # POSITION_CATEGORIES (QB/RB/WR/TE) governs whether a context-aware gridlytics_base gets
-        # attempted below -- it must never gate roster membership itself, or K/DEF slots silently
-        # go unfilled in the lineup-comparison baseline.
+        # POSITION_CATEGORIES governs the context-aware model attempt only -- never gates roster membership itself.
         final = compute_final_projection(roster_gridlytics_base.get(pid), roster_platform_projection.get(pid), None)
         if final is None:
             continue
