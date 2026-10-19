@@ -4,7 +4,7 @@ from app.projections.models import PlayerProjection
 from app.projections.value import compute_value_over_replacement
 
 
-def _proj(player_id: str, position: str, points: float) -> PlayerProjection:
+def _proj(player_id: str, position: str, points: float | None) -> PlayerProjection:
     return PlayerProjection(player_id, f"Player {player_id}", position, points, ["test"])
 
 
@@ -43,3 +43,22 @@ def test_value_over_replacement_handles_fewer_players_than_replacement_rank():
     vor = compute_value_over_replacement(projections, roster_positions, num_teams)
 
     assert vor["te1"] == pytest.approx(12.0)
+
+
+def test_value_over_replacement_skips_players_with_no_projection():
+    # A player with no projection from any source (gridlytics or platform) has projected_points=None.
+    projections = [
+        _proj("rb1", "RB", 20),
+        _proj("rb2", "RB", 10),
+        _proj("rb3", "RB", None),
+    ]
+    roster_positions = ["RB", "BN"]
+    num_teams = 1
+
+    vor = compute_value_over_replacement(projections, roster_positions, num_teams)
+
+    # rb3 is excluded entirely rather than crashing the sort or corrupting replacement level.
+    assert "rb3" not in vor
+    # replacement level still correctly derived from only the real projections (1 slot x 1 team = rb1's 20).
+    assert vor["rb1"] == pytest.approx(0.0)
+    assert vor["rb2"] == pytest.approx(10 - 20)

@@ -11,8 +11,12 @@ def compute_value_over_replacement(
         if slot in FIXED_POSITIONS:
             slots_per_team[slot] = slots_per_team.get(slot, 0) + 1
 
+    # A player with no projection from any source has projected_points=None -- excluded entirely,
+    # since there's no meaningful value-over-replacement for a player with no projection at all.
+    projected = [p for p in projections if p.projected_points is not None]
+
     by_position: dict[str, list[PlayerProjection]] = {}
-    for projection in projections:
+    for projection in projected:
         by_position.setdefault(projection.position, []).append(projection)
 
     replacement_level: dict[str, float] = {}
@@ -26,5 +30,5 @@ def compute_value_over_replacement(
 
     return {
         p.platform_player_id: p.projected_points - replacement_level.get(p.position, 0.0)
-        for p in projections
+        for p in projected
     }
