@@ -220,20 +220,12 @@ async def set_my_team(
 async def get_standings(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
 ) -> list[dict]:
-    scores = await load_weekly_scores(session, league.id)
+    scores = await load_weekly_scores(session, league.id, before_week=league.current_week)
     expected_wins = compute_expected_wins(scores) if len(scores) else {}
     schedule_strength = compute_schedule_strength(scores) if len(scores) else {}
 
     result = await session.execute(select(Team).where(Team.league_id == league.id))
     teams = result.scalars().all()
-
-    logger.info(
-        "DIAG standings league_id=%s rows=%s weeks=%s per_team_weeks=%s",
-        league.id,
-        len(scores),
-        sorted(scores["week"].unique().tolist()) if len(scores) else [],
-        scores.groupby("team_id")["week"].apply(lambda w: sorted(w.tolist())).to_dict() if len(scores) else {},
-    )
 
     return [
         {
@@ -253,7 +245,7 @@ async def get_standings(
 async def get_power_rankings(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
 ) -> list[dict]:
-    stats = await load_power_ranking_inputs(session, league.id)
+    stats = await load_power_ranking_inputs(session, league.id, before_week=league.current_week)
     if not len(stats):
         return []
     rankings = compute_power_rankings(stats)
@@ -324,7 +316,9 @@ async def get_team_roster(
 async def get_playoff_odds(
     league: League = Depends(get_fresh_league), session: AsyncSession = Depends(get_session)
 ) -> list[dict]:
-    current_records, team_score_dist = await load_simulation_inputs(session, league.id)
+    current_records, team_score_dist = await load_simulation_inputs(
+        session, league.id, before_week=league.current_week
+    )
     remaining_schedule = await load_remaining_schedule(session, league)
 
     odds = simulate_season(
@@ -361,7 +355,7 @@ async def get_weekly_recap(
     if not len(week_scores):
         raise HTTPException(status_code=404, detail=f"No data for week {week}")
 
-    power_inputs = await load_power_ranking_inputs(session, league.id)
+    power_inputs = await load_power_ranking_inputs(session, league.id, before_week=league.current_week)
     power_scores = {}
     if len(power_inputs):
         rankings = compute_power_rankings(power_inputs)

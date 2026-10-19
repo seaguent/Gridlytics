@@ -9,12 +9,20 @@ DEFAULT_MEAN = 100.0
 DEFAULT_STD = 15.0
 
 
-async def load_weekly_scores(session: AsyncSession, league_id: int) -> pd.DataFrame:
-    result = await session.execute(
+async def load_weekly_scores(
+    session: AsyncSession, league_id: int, before_week: int | None = None
+) -> pd.DataFrame:
+    # A league has WeeklyScore rows synced for its full scheduled season, including weeks that
+    # haven't been played yet -- those must be excluded or they corrupt every stat derived from
+    # real performance (expected wins, score distributions, power rankings) with tied/placeholder data.
+    query = (
         select(WeeklyScore, Matchup.week)
         .join(Matchup, WeeklyScore.matchup_id == Matchup.id)
         .where(Matchup.league_id == league_id)
     )
+    if before_week is not None:
+        query = query.where(Matchup.week < before_week)
+    result = await session.execute(query)
     rows = result.all()
 
     scores_by_matchup: dict[int, list[tuple[WeeklyScore, int]]] = {}
@@ -73,7 +81,9 @@ async def load_roster_slots(session: AsyncSession, league_id: int) -> pd.DataFra
     )
 
 
-async def load_simulation_inputs(session: AsyncSession, league_id: int) -> tuple[dict, dict]:
+async def load_simulation_inputs(
+    session: AsyncSession, league_id: int, before_week: int | None = None
+) -> tuple[dict, dict]:
     result = await session.execute(select(Team).where(Team.league_id == league_id))
     teams = result.scalars().all()
 
@@ -82,7 +92,7 @@ async def load_simulation_inputs(session: AsyncSession, league_id: int) -> tuple
         for team in teams
     }
 
-    scores = await load_weekly_scores(session, league_id)
+    scores = await load_weekly_scores(session, league_id, before_week=before_week)
 
     league_mean = scores["points"].mean() if len(scores) >= 1 else DEFAULT_MEAN
     league_std = scores["points"].std() if len(scores) >= 2 else DEFAULT_STD
@@ -108,11 +118,13 @@ async def load_simulation_inputs(session: AsyncSession, league_id: int) -> tuple
     return current_records, team_score_dist
 
 
-async def load_power_ranking_inputs(session: AsyncSession, league_id: int) -> pd.DataFrame:
+async def load_power_ranking_inputs(
+    session: AsyncSession, league_id: int, before_week: int | None = None
+) -> pd.DataFrame:
     result = await session.execute(select(Team).where(Team.league_id == league_id))
     teams = result.scalars().all()
 
-    scores = await load_weekly_scores(session, league_id)
+    scores = await load_weekly_scores(session, league_id, before_week=before_week)
     expected_wins = compute_expected_wins(scores) if len(scores) else {}
     recent_form = compute_recent_form(scores) if len(scores) else {}
 
