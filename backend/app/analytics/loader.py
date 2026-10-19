@@ -21,20 +21,32 @@ async def load_weekly_scores(session: AsyncSession, league_id: int) -> pd.DataFr
     for weekly_score, week in rows:
         scores_by_matchup.setdefault(weekly_score.matchup_id, []).append((weekly_score, week))
 
-    records = []
+    # A leftover duplicate Matchup row for the same (league, week) -- e.g. from the concurrency
+    # race that existed before the per-league sync lock -- would otherwise double-count a team's
+    # score for that real week. Keep only the highest matchup_id (most recently synced) per
+    # (team_id, week).
+    best_by_team_week: dict[tuple[int, int], tuple[WeeklyScore, int]] = {}
     for entries in scores_by_matchup.values():
         for weekly_score, week in entries:
-            opponents = [
-                other.team_id for other, _ in entries if other.team_id != weekly_score.team_id
-            ]
-            records.append(
-                {
-                    "team_id": weekly_score.team_id,
-                    "week": week,
-                    "points": weekly_score.points,
-                    "opponent_team_id": opponents[0] if opponents else None,
-                }
-            )
+            key = (weekly_score.team_id, week)
+            existing = best_by_team_week.get(key)
+            if existing is None or weekly_score.matchup_id > existing[0].matchup_id:
+                best_by_team_week[key] = (weekly_score, week)
+
+    records = []
+    for weekly_score, week in best_by_team_week.values():
+        entries = scores_by_matchup[weekly_score.matchup_id]
+        opponents = [
+            other.team_id for other, _ in entries if other.team_id != weekly_score.team_id
+        ]
+        records.append(
+            {
+                "team_id": weekly_score.team_id,
+                "week": week,
+                "points": weekly_score.points,
+                "opponent_team_id": opponents[0] if opponents else None,
+            }
+        )
 
     return pd.DataFrame(records, columns=["team_id", "week", "points", "opponent_team_id"])
 

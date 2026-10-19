@@ -22,16 +22,19 @@ async def test_load_simulation_inputs_computes_records_and_score_distributions(d
     db_session.add_all([team_a, team_b, team_c])
     await db_session.flush()
 
-    matchup = Matchup(league_id=league.id, week=1, platform_matchup_id=10)
-    db_session.add(matchup)
+    # Real synced data always has one Matchup row per real week -- matches that here.
+    matchup_week1 = Matchup(league_id=league.id, week=1, platform_matchup_id=10)
+    matchup_week2 = Matchup(league_id=league.id, week=2, platform_matchup_id=11)
+    matchup_week3 = Matchup(league_id=league.id, week=3, platform_matchup_id=12)
+    db_session.add_all([matchup_week1, matchup_week2, matchup_week3])
     await db_session.flush()
 
     db_session.add_all(
         [
-            WeeklyScore(team_id=team_a.id, matchup_id=matchup.id, week=1, points=110),
-            WeeklyScore(team_id=team_a.id, matchup_id=matchup.id, week=2, points=90),
-            WeeklyScore(team_id=team_a.id, matchup_id=matchup.id, week=3, points=100),
-            WeeklyScore(team_id=team_b.id, matchup_id=matchup.id, week=1, points=95),
+            WeeklyScore(team_id=team_a.id, matchup_id=matchup_week1.id, week=1, points=110),
+            WeeklyScore(team_id=team_a.id, matchup_id=matchup_week2.id, week=2, points=90),
+            WeeklyScore(team_id=team_a.id, matchup_id=matchup_week3.id, week=3, points=100),
+            WeeklyScore(team_id=team_b.id, matchup_id=matchup_week1.id, week=1, points=95),
         ]
     )
     await db_session.commit()
