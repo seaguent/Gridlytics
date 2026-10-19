@@ -129,6 +129,54 @@ async def test_sync_week_creates_matchups_and_weekly_scores(db_session):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_sync_week_computes_points_from_starters_when_sleeper_points_is_zero(db_session):
+    # Some leagues (custom scoring) get points=0 at the top level from Sleeper's matchups
+    # endpoint even though the real per-player points are present -- must not trust points=0
+    # blindly when players_points has real starter data to sum instead.
+    league_id = "123"
+    _mock_sleeper_league(league_id)
+    respx.get(f"{SLEEPER_BASE_URL}/league/{league_id}/matchups/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "roster_id": 1,
+                    "matchup_id": 10,
+                    "points": 0,
+                    "starters": ["p1", "p2"],
+                    "players": ["p1", "p2", "p3"],
+                    "players_points": {"p1": 20.5, "p2": 15.0, "p3": 99.0},
+                },
+                {
+                    "roster_id": 2,
+                    "matchup_id": 10,
+                    "points": 0,
+                    "starters": ["p4"],
+                    "players": ["p4"],
+                    "players_points": {"p4": 50.0},
+                },
+            ],
+        )
+    )
+
+    client = SleeperClient()
+    league = await sync_league(db_session, client, league_id)
+    await sync_week(db_session, client, league, week=1)
+    await client.aclose()
+
+    result = await db_session.execute(select(Matchup).where(Matchup.league_id == league.id))
+    matchup = result.scalars().first()
+    result = await db_session.execute(
+        select(WeeklyScore).where(WeeklyScore.matchup_id == matchup.id).order_by(WeeklyScore.team_id)
+    )
+    scores = {score.team_id: score.points for score in result.scalars().all()}
+
+    # p3 is on the roster but not a starter -- excluded from the real team total (20.5 + 15.0).
+    assert sorted(scores.values()) == sorted([35.5, 50.0])
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_sync_week_tolerates_a_preexisting_duplicate_matchup_row(db_session):
     _mock_sleeper_league("123")
     _mock_sleeper_week1_matchups("123")

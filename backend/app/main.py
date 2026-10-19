@@ -224,15 +224,6 @@ async def get_standings(
     expected_wins = compute_expected_wins(scores) if len(scores) else {}
     schedule_strength = compute_schedule_strength(scores) if len(scores) else {}
 
-    logger.info(
-        "DIAG2 standings league_id=%s points_by_week=%s",
-        league.id,
-        {
-            int(week): group["points"].tolist()
-            for week, group in (scores.groupby("week") if len(scores) else [])
-        },
-    )
-
     result = await session.execute(select(Team).where(Team.league_id == league.id))
     teams = result.scalars().all()
 

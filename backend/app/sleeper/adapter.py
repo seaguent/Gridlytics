@@ -124,6 +124,18 @@ async def sync_week(
         if team is None:
             continue
 
+        starters = set(raw.starters)
+        # Some leagues (custom scoring) get points=0 at the top level from Sleeper even though
+        # real per-player points exist -- sum the real starter points instead of trusting a
+        # blank/zero team total.
+        team_points = raw.points
+        if not team_points and starters:
+            starter_points = [
+                points for player_id, points in raw.players_points.items() if player_id in starters
+            ]
+            if starter_points:
+                team_points = sum(starter_points)
+
         result = await session.execute(
             select(WeeklyScore)
             .where(
@@ -135,12 +147,10 @@ async def sync_week(
         weekly_score = result.scalars().first()
         if weekly_score is None:
             session.add(
-                WeeklyScore(team_id=team.id, matchup_id=matchup.id, week=week, points=raw.points)
+                WeeklyScore(team_id=team.id, matchup_id=matchup.id, week=week, points=team_points)
             )
         else:
-            weekly_score.points = raw.points
-
-        starters = set(raw.starters)
+            weekly_score.points = team_points
         for platform_player_id, points in raw.players_points.items():
             is_starter = platform_player_id in starters
 
