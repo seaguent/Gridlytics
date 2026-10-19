@@ -183,7 +183,15 @@ async def temp_force_resync_all_sleeper(session: AsyncSession = Depends(get_sess
     try:
         for league in leagues:
             await refresh_league(session, client, league.platform_league_id, force_full_resync=True)
-            fixed.append({"league_id": league.id, "name": league.name})
+            scores = await load_weekly_scores(session, league.id, before_week=league.current_week)
+            expected_wins = compute_expected_wins(scores) if len(scores) else {}
+            fixed.append(
+                {
+                    "league_id": league.id,
+                    "name": league.name,
+                    "expected_wins": expected_wins,
+                }
+            )
     finally:
         await client.aclose()
 
