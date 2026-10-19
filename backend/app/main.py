@@ -172,32 +172,6 @@ async def resync_sleeper_league(
     return {"status": "ok"}
 
 
-@app.post("/admin/temp-force-resync-all-sleeper")
-async def temp_force_resync_all_sleeper(session: AsyncSession = Depends(get_session)) -> dict:
-    """One-off, no-auth data-repair route -- remove immediately after use, not a real feature."""
-    result = await session.execute(select(League).where(League.platform == "sleeper"))
-    leagues = result.scalars().all()
-
-    client = SleeperClient()
-    fixed = []
-    try:
-        for league in leagues:
-            await refresh_league(session, client, league.platform_league_id, force_full_resync=True)
-            scores = await load_weekly_scores(session, league.id, before_week=league.current_week)
-            expected_wins = compute_expected_wins(scores) if len(scores) else {}
-            fixed.append(
-                {
-                    "league_id": league.id,
-                    "name": league.name,
-                    "expected_wins": expected_wins,
-                }
-            )
-    finally:
-        await client.aclose()
-
-    return {"status": "ok", "leagues": fixed}
-
-
 @app.get("/leagues/me")
 async def get_league_info(
     league: League = Depends(get_fresh_league),
