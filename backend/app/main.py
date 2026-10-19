@@ -227,6 +227,14 @@ async def get_standings(
     result = await session.execute(select(Team).where(Team.league_id == league.id))
     teams = result.scalars().all()
 
+    logger.info(
+        "DIAG standings league_id=%s rows=%s weeks=%s per_team_weeks=%s",
+        league.id,
+        len(scores),
+        sorted(scores["week"].unique().tolist()) if len(scores) else [],
+        scores.groupby("team_id")["week"].apply(lambda w: sorted(w.tolist())).to_dict() if len(scores) else {},
+    )
+
     return [
         {
             "team_id": team.id,
